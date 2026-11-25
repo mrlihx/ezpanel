@@ -1,0 +1,174 @@
+.app-catalog-name {
+  --content-sized-limit: 192px;
+}
+
+.app-catalog-version {
+  --content-sized-limit: 128px;
+}
+
+.app-catalog-description .content-sized-cell {
+  min-width: 160px;
+  max-width: 640px;
+}
+
+.app-catalog-source {
+  --content-sized-limit: 120px;
+}
+
+.app-catalog-status {
+  --content-sized-limit: 104px;
+}
+
+.app-catalog-actions {
+  --content-sized-limit: 128px;
+}
+
+.app-catalog-name .ant-space-item {
+  min-width: 0;
+}
+
+.app-catalog-name .ant-btn-link {
+  height: auto;
+  max-width: 100%;
+  white-space: normal;
+  text-align: start;
+}
+
+.app-database-catalog
+  :is(.app-catalog-name, .app-catalog-source, .app-catalog-status)
+  .content-sized-cell {
+  white-space: nowrap;
+  max-width: none;
+}
+
+.app-database-catalog .app-catalog-version {
+  --content-sized-limit: 360px;
+}
+
+.app-settings-tabs {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+
+.app-settings-tabs > .ant-tabs-nav {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.app-settings-tabs.ant-tabs-left > .ant-tabs-nav {
+  height: 100%;
+  padding-top: 4px;
+}
+
+.app-settings-tabs.ant-tabs-left > .ant-tabs-nav .ant-tabs-tab {
+  min-width: 124px;
+  justify-content: flex-start;
+}
+
+.app-settings-tabs > .ant-tabs-content-holder {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 8px 16px 20px;
+}
+
+.app-settings-tabs.ant-tabs-left > .ant-tabs-content-holder {
+  height: 100%;
+}
+
+.app-settings-tabs.ant-tabs-left > .ant-tabs-content-holder .ant-tabs-tabpane {
+  padding-left: 0 !important;
+}
+
+.app-settings-tabs .application-settings-form {
+  max-width: 640px;
+}
+
+/* 应用设置弹窗内苹果风格分组卡片 */
+.app-settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+}
+
+.app-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: var(--ant-color-fill-quaternary);
+  border: 1px solid var(--ant-color-border-secondary);
+}
+
+.app-settings-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ant-color-text-secondary);
+  letter-spacing: 0.01em;
+}
+
+.app-settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.app-settings-row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.app-settings-row-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.app-settings-danger {
+  border-color: rgba(255, 59, 48, 0.22);
+  background: rgba(255, 59, 48, 0.04);
+}
+
+.app-settings-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.app-settings-editor-box {
+  height: max(340px, calc(72dvh - 185px));
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--ant-color-border-secondary);
+}
+
+@media (max-width: 767px) {
+  .app-settings-tabs > .ant-tabs-content-holder {
+    padding: 12px 0 8px;
+  }
+
+  .app-settings-tabs .application-settings-form {
+    max-width: 100%;
+  }
+
+  .app-settings-section {
+    padding: 14px;
+  }
+
+  .app-settings-editor-box {
+    height: 360px;
+  }
+}

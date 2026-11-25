@@ -1,0 +1,101 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build and check
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=0.0.0-dev
+          if [[ $REF_TYPE == tag ]]; then
+            [[ $TAG =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-r[1-9][0-9]*)?$ ]]
+            version=${TAG#v}
+            version=${version%%-r*}
+          fi
+          make build VERSION="$version"
+          make test lint
+          bash -n scripts/install.sh
+          test "$(dist/ezpanel-linux-amd64 version)" = "$version"
+          (cd dist && sha256sum --check SHA256SUMS)
+      - name: Prepare release assets
+        if: github.ref_type == 'tag'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          cp scripts/install.sh LICENSE dist/
+          git archive --format=tar.gz --prefix="ezpanel-$TAG/" -o "dist/ezpanel-$TAG-src.tar.gz" HEAD
+          bash scripts/release-notices.sh
+          cd dist
+          sha256sum ezpanel-linux-amd64 ezpanel-linux-arm64 install.sh LICENSE "ezpanel-$TAG-src.tar.gz" third-party-notices.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ezpanel-linux
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    if: github.repository == 'mrlihx/ezpanel' && github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ezpanel-linux
+          path: dist
+      - name: Sign release checksums
+        env:
+          RELEASE_PRIVATE_KEY: ${{ secrets.EPANEL_RELEASE_PRIVATE_KEY }}
+        working-directory: dist
+        run: |
+          test -n "$RELEASE_PRIVATE_KEY"
+          sha256sum --check SHA256SUMS
+          openssl dgst -sha256 -sign <(printf '%s\n' "$RELEASE_PRIVATE_KEY") -out SHA256SUMS.sig SHA256SUMS
+          openssl dgst -sha256 -verify <(sed -n '/^-----BEGIN PUBLIC KEY-----$/,/^-----END PUBLIC KEY-----$/p' install.sh) -signature SHA256SUMS.sig SHA256SUMS
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          flags=()
+          if [[ $TAG == v0.* ]]; then flags+=(--prerelease --latest=false); fi
+          title="EzPanel ${TAG#v}"
+          if [[ $TAG == *-r* ]]; then
+            version=${TAG%%-r*}
+            title="EzPanel ${version#v}（发布修订 ${TAG##*-r}）"
+          fi
+          if draft=$(gh release view "$TAG" --json isDraft --jq '.isDraft'); then
+            if [[ $draft == false ]]; then exit 0; fi
+          else
+            gh release create "$TAG" --verify-tag --draft --generate-notes --title "$title" "${flags[@]}"
+          fi
+          gh release upload "$TAG" --clobber dist/*
+          gh release edit "$TAG" --draft=false "${flags[@]}"

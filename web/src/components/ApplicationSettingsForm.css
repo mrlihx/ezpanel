@@ -1,0 +1,32 @@
+.application-settings-form {
+  --application-setting-label-width: clamp(5.5rem, 32%, 9.5rem);
+}
+
+.application-settings-form .ant-form-item-row {
+  flex-wrap: nowrap;
+}
+
+.application-settings-form .ant-form-item-label {
+  padding-inline-end: 12px;
+}
+
+.application-settings-form .ant-form-item-label label {
+  height: auto;
+  min-height: var(--ant-control-height, 32px);
+  overflow-wrap: anywhere;
+}
+
+.application-settings-form .ant-form-item-control {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.application-settings-form .application-settings-actions {
+  margin-inline-start: var(--application-setting-label-width);
+}
+
+@media (max-width: 767px) {
+  .application-settings-form .application-settings-actions {
+    margin-inline-start: 0;
+  }
+}

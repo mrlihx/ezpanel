@@ -1,0 +1,27 @@
+.ant-modal.panel-message-box .ant-modal-content > .ant-modal-body {
+  overflow: hidden !important;
+}
+
+.message-box-tabs,
+.message-box-tabs > .ant-tabs-content-holder > .ant-tabs-content,
+.message-box-tabs
+  > .ant-tabs-content-holder
+  > .ant-tabs-content
+  > .ant-tabs-tabpane,
+.message-box-list-pane,
+.message-box-log-pane {
+  height: 100%;
+  min-height: 0;
+}
+
+.message-box-tabs > .ant-tabs-content-holder {
+  min-height: 0;
+}
+
+.message-box-list-pane {
+  overflow-y: auto;
+}
+
+.message-box-log-pane {
+  overflow: hidden;
+}

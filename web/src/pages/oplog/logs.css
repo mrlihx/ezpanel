@@ -1,0 +1,166 @@
+.logs-page {
+  min-width: 0;
+}
+.logs-card .ant-card-body {
+  padding: 24px;
+}
+.logs-page-website {
+  display: flex;
+  flex-direction: column;
+  height: var(--panel-content-height, 100dvh);
+  max-height: var(--panel-content-height, 100dvh);
+  min-height: 0;
+  overflow: hidden;
+}
+.logs-page-website .logs-card,
+.logs-page-website .logs-card > .ant-card-body,
+.logs-page-website .website-log-box-fill {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+}
+.logs-page-website .logs-card > .ant-card-body {
+  overflow: auto;
+}
+.logs-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0;
+}
+.logs-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.logs-search {
+  width: 280px;
+  max-width: 100%;
+}
+.logs-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  overflow-wrap: anywhere;
+}
+.logs-output {
+  background: var(--logs-background);
+  color: var(--logs-foreground);
+  border-radius: 14px;
+  padding: 16px;
+  margin: 12px 0 0;
+  height: max(320px, calc(var(--panel-content-height, 100dvh) - 352px));
+  overflow: auto;
+  white-space: pre;
+  font: 13px/1.65 var(--logs-font);
+  outline-offset: 2px;
+}
+.logs-split {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 24px;
+}
+.logs-sidebar {
+  min-width: 0;
+}
+.logs-sidebar .ant-menu {
+  margin-top: 12px;
+  padding: 6px;
+  border: 1px solid rgba(128, 128, 136, 0.12);
+  border-radius: 14px;
+  background: rgba(118, 118, 128, 0.04);
+  max-height: 65dvh;
+  overflow: auto;
+}
+.logs-sidebar .ant-menu-title-content {
+  white-space: normal;
+  line-height: 1.5;
+  padding-block: 6px;
+}
+.logs-sidebar .ant-menu-item {
+  height: auto;
+  min-height: 38px;
+  margin-inline: 0 !important;
+  border-radius: 9px !important;
+}
+.audit-log-lines {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  min-width: 0;
+}
+
+.audit-log-lines > .ant-typography-secondary {
+  font-size: 12px;
+}
+
+.audit-log-target,
+.audit-log-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-operation-table .content-sized-fill .content-sized-cell {
+  min-width: 180px;
+  max-width: 340px;
+}
+
+.audit-log-target {
+  display: block;
+  width: 100%;
+  max-width: 340px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--logs-link);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.audit-log-target:hover {
+  text-decoration: underline;
+}
+
+.audit-result {
+  margin-inline-end: 0;
+}
+
+.logs-time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.logs-status {
+  white-space: nowrap;
+}
+@media (max-width: 767px) {
+  .audit-operation-table .content-sized-fill .content-sized-cell,
+  .audit-operation-table .audit-log-target,
+  .audit-operation-table .audit-log-preview {
+    max-width: 220px;
+  }
+
+  .logs-card .ant-card-body {
+    padding: 16px;
+  }
+  .logs-split {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  .logs-sidebar .ant-menu {
+    max-height: 180px;
+  }
+  .logs-search {
+    width: 100%;
+  }
+  .logs-output {
+    height: 420px;
+  }
+}

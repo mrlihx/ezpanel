@@ -1,0 +1,10 @@
+.file-picker-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-block: 16px;
+}
+.file-picker-toolbar > .ant-input-search {
+  flex: 1;
+  min-width: 0;
+}

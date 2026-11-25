@@ -1,0 +1,17 @@
+id: hello-plugin
+name: Hello 插件
+version: 0.1.0
+description: 展示共享 React、主题与受控 Host 服务器信息
+author: ezpanel example
+type: process
+minPanelVersion: 0.0.0
+sdkVersion: 1
+entry:
+  linux-amd64: bin/linux-amd64/server
+  linux-arm64: bin/linux-arm64/server
+menu:
+  title: Hello 插件
+  icon: AppstoreOutlined
+  order: 100
+ui: web/entry.js
+permissions: [sysinfo.read]

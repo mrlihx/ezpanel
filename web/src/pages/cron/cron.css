@@ -1,0 +1,63 @@
+.cron-list-card .ant-card-head {
+  min-height: 48px;
+}
+
+.cron-toolbar .ant-input-search {
+  width: 260px;
+}
+
+.cron-log-summary {
+  margin-bottom: 16px;
+}
+
+.cron-log-output {
+  margin-top: 8px;
+}
+
+.cron-cycle-select.ant-select {
+  flex: 0 1 120px;
+  width: 120px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.cron-cycle-number {
+  flex: 0 1 88px;
+  width: 88px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 992px) {
+  .cron-toolbar > .ant-space {
+    width: 100%;
+  }
+
+  .cron-toolbar .ant-input-search {
+    width: 100%;
+  }
+}
+
+.cron-row-actions .ant-btn,
+.cron-status.ant-btn {
+  padding-inline: 0;
+}
+.cron-status.ant-btn {
+  background: transparent;
+}
+.cron-script-editor:focus-within {
+  outline: 2px solid var(--ant-color-primary, #2563eb);
+  outline-offset: 1px;
+}
+
+.cron-url-parameters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px;
+  align-items: start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cron-url-parameters .ant-form-item {
+  margin-bottom: 0;
+}

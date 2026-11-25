@@ -1,0 +1,263 @@
+.terminal-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  height: var(--panel-content-height);
+}
+
+.panel-terminal-fullscreen {
+  height: 100dvh;
+  gap: 8px;
+  padding: var(--ant-padding-xs) var(--ant-padding-sm);
+  background: var(--ant-color-bg-container);
+  color: var(--ant-color-text);
+}
+
+.terminal-pseudo-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  padding-top: max(var(--ant-padding-xs), env(safe-area-inset-top));
+  padding-bottom: max(var(--ant-padding-xs), env(safe-area-inset-bottom));
+}
+
+.terminal-workspace:not([hidden]) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.terminal-session-tabs > .ant-tabs-nav {
+  margin-bottom: 12px !important;
+}
+
+.terminal-session-tabs > .ant-tabs-nav > .ant-tabs-nav-wrap {
+  flex: 0 1 auto;
+}
+
+.terminal-session-tabs > .ant-tabs-nav > .ant-tabs-extra-content {
+  flex: 1 0 auto;
+  padding-inline-start: var(--ant-padding-xs);
+  padding-bottom: var(--ant-padding-xxs);
+}
+
+/* 新建终端悬浮卡片 */
+.terminal-launcher-overlay {
+  max-width: calc(100vw - 16px);
+}
+
+.terminal-launcher-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(300px, calc(100vw - 48px));
+  max-width: 100%;
+}
+
+.terminal-launcher-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.terminal-empty-state {
+  border-radius: 16px;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+}
+
+.terminal-launcher-item {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--ant-color-border-secondary);
+  background: var(--ant-color-fill-quaternary);
+  color: var(--ant-color-text);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease;
+}
+
+.terminal-launcher-item:hover:not(:disabled) {
+  border-color: var(--ant-color-primary);
+  background: var(--ant-color-primary-bg);
+}
+
+.terminal-launcher-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.terminal-launcher-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.terminal-launcher-item-name {
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-launcher-item-meta {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 终端底部命令栏（暗色终端表面独立配色，避免被浅色主题全局 focus 样式覆盖） */
+.terminal-command-bar {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.terminal-command-select {
+  width: 10.5rem;
+  flex-shrink: 0;
+}
+
+.terminal-command-bar
+  .terminal-command-select.ant-select-outlined:not(.ant-select-customize-input)
+  .ant-select-selector,
+.terminal-command-bar .terminal-command-input.ant-input-outlined,
+.terminal-mobile-bar .terminal-mobile-input.ant-input-outlined {
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  color: #f5f5f7 !important;
+  box-shadow: none !important;
+}
+
+.terminal-command-bar
+  .terminal-command-select.ant-select-outlined:not(.ant-select-disabled):not(
+    .ant-select-customize-input
+  ):hover
+  .ant-select-selector,
+.terminal-command-bar .terminal-command-input.ant-input-outlined:hover,
+.terminal-mobile-bar .terminal-mobile-input.ant-input-outlined:hover {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.24) !important;
+}
+
+.terminal-command-bar
+  .terminal-command-select.ant-select-focused.ant-select-outlined:not(
+    .ant-select-customize-input
+  )
+  .ant-select-selector,
+.terminal-command-bar .terminal-command-input.ant-input-outlined:focus,
+.terminal-command-bar .terminal-command-input.ant-input-outlined:focus-within,
+.terminal-mobile-bar .terminal-mobile-input.ant-input-outlined:focus,
+.terminal-mobile-bar .terminal-mobile-input.ant-input-outlined:focus-within {
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  border-color: #0a84ff !important;
+  box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.28) !important;
+  color: #f5f5f7 !important;
+}
+
+.terminal-command-bar
+  .terminal-command-select
+  .ant-select-selection-placeholder,
+.terminal-command-bar .terminal-command-select .ant-select-arrow,
+.terminal-command-bar .terminal-command-input::placeholder,
+.terminal-mobile-bar .terminal-mobile-input::placeholder {
+  color: rgba(245, 245, 247, 0.55) !important;
+}
+
+.terminal-command-bar .terminal-command-select .ant-select-selection-item {
+  color: #f5f5f7 !important;
+}
+
+/* 暗色常用命令下拉浮层（Select & Mobile Dropdown） */
+.terminal-command-dropdown.ant-select-dropdown,
+.terminal-command-dropdown .ant-dropdown-menu {
+  background: #232326 !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45) !important;
+  padding: 6px !important;
+}
+
+.terminal-command-dropdown .ant-select-item,
+.terminal-command-dropdown .ant-dropdown-menu-item {
+  color: #f5f5f7 !important;
+  border-radius: 8px !important;
+}
+
+.terminal-command-dropdown .ant-select-item-option-active,
+.terminal-command-dropdown .ant-select-item-option-selected,
+.terminal-command-dropdown .ant-dropdown-menu-item:hover {
+  background: rgba(10, 132, 255, 0.24) !important;
+  color: #ffffff !important;
+}
+
+.terminal-command-dropdown .ant-select-item-empty,
+.terminal-command-dropdown .ant-empty-description,
+.terminal-command-dropdown .ant-dropdown-menu-item-disabled {
+  color: rgba(245, 245, 247, 0.5) !important;
+}
+
+/* 移动端常用命令按钮 */
+.terminal-mobile-cmd-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: #f5f5f7;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.terminal-mobile-cmd-btn:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.terminal-mobile-cmd-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 767px) {
+  .terminal-page {
+    gap: 12px;
+  }
+
+  .terminal-launcher-card {
+    padding: 16px;
+    gap: 14px;
+  }
+
+  .terminal-launcher-search {
+    max-width: 100%;
+  }
+
+  .terminal-launcher-grid {
+    grid-template-columns: 1fr;
+  }
+}

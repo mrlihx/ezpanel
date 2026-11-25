@@ -1,0 +1,9 @@
+.site-form .ant-form-item-row {
+  flex-wrap: nowrap;
+}
+
+@media (max-width: 575px) {
+  .site-form .ant-form-item-row {
+    flex-wrap: wrap;
+  }
+}

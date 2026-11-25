@@ -1,0 +1,105 @@
+.security-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.security-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.security-status-strip {
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(118, 118, 128, 0.05);
+  border: 1px solid rgba(128, 128, 136, 0.11);
+  margin-bottom: 12px;
+}
+.security-toolbar .security-search {
+  margin-left: auto;
+  width: 280px;
+  max-width: 100%;
+}
+.security-table {
+  min-width: 0;
+  overflow: hidden;
+}
+.security-data-table {
+  --content-sized-cell-padding: 10px;
+}
+.security-data-table .firewall-origin {
+  margin-inline-end: 0;
+  white-space: nowrap;
+}
+.security-data-table
+  .content-sized-remark.content-sized-grow
+  .content-sized-cell {
+  display: block;
+  width: auto;
+  max-width: 360px;
+}
+.security-ssh-summary {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(0, 3fr);
+  gap: 16px;
+}
+.security-ssh-counts {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.security-ssh-total {
+  cursor: pointer;
+  font: inherit;
+  padding: 16px 24px;
+  border: 1px solid;
+  border-radius: 14px;
+  text-align: center;
+  transition: transform 0.16s cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+.security-ssh-total:hover {
+  transform: translateY(-1px);
+}
+.security-ssh-total:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+.security-ssh-periods {
+  flex: 1;
+  min-width: 240px;
+}
+.security-ssh-period {
+  display: grid;
+  grid-template-columns: 45px 1fr 90px;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+}
+.security-ssh-bar {
+  display: flex;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+}
+.security-ssh-field {
+  margin-bottom: 24px;
+}
+.security-ssh-field:last-child {
+  margin-bottom: 0;
+}
+@media (max-width: 800px) {
+  .security-data-table {
+    --content-sized-cell-padding: 8px;
+  }
+  .security-ssh-summary {
+    grid-template-columns: 1fr;
+  }
+  .security-toolbar .security-search {
+    margin-left: 0;
+    width: 100%;
+  }
+}

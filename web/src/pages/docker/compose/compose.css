@@ -1,0 +1,318 @@
+.compose-form {
+  --application-setting-label-width: 116px;
+}
+.compose-code-editor {
+  min-width: 0;
+  height: clamp(220px, 42dvh, 520px);
+}
+.compose-form .compose-code-editor {
+  height: 30dvh;
+  min-height: 200px;
+}
+.compose-form .ant-form-item {
+  margin-bottom: 16px;
+}
+.compose-form .ant-segmented {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.compose-code-editor + .ant-alert {
+  margin-top: 8px;
+}
+.compose-env-rows {
+  max-height: 34dvh;
+  overflow: auto;
+}
+.compose-env-key.ant-input {
+  width: 36%;
+  flex-shrink: 0;
+}
+.compose-env-text.ant-input {
+  font-family: ui-monospace, monospace;
+}
+.compose-toolbar {
+  margin-bottom: 16px;
+}
+.compose-subnav {
+  margin-bottom: 16px;
+}
+.compose-workspace {
+  display: grid;
+  grid-template-columns: minmax(205px, 25%) minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.compose-panel {
+  min-width: 0;
+  border-radius: var(--compose-radius);
+  background: var(--compose-surface);
+  box-shadow: var(--compose-shadow);
+}
+
+.compose-project-list {
+  position: sticky;
+  top: 12px;
+  max-height: clamp(280px, calc(100dvh - 235px), 820px);
+  overflow: auto;
+}
+
+.compose-list-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--compose-border);
+  background: var(--compose-surface);
+}
+
+.compose-list-footer {
+  padding: 10px 14px;
+  border-top: 1px solid var(--compose-border);
+}
+
+.compose-project-list > .ant-skeleton {
+  padding: 14px;
+}
+
+.compose-project-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.compose-project-items > li + li {
+  border-top: 1px solid var(--compose-border);
+}
+
+.compose-project-current {
+  background: var(--compose-selected);
+}
+
+.compose-project-line {
+  display: flex;
+  align-items: center;
+}
+
+.compose-project-line > .ant-checkbox-wrapper {
+  margin-inline-start: 14px;
+}
+
+.compose-project-button {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--compose-ink);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+}
+
+.compose-project-button:hover {
+  background: var(--compose-hover);
+}
+
+.compose-project-button:focus-visible {
+  outline: 2px solid var(--compose-accent);
+  outline-offset: -2px;
+}
+
+.compose-project-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.compose-project-current .compose-project-name {
+  color: var(--compose-accent);
+}
+
+.compose-project-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--compose-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.compose-project-state {
+  font-variant-numeric: tabular-nums;
+}
+
+.compose-project-state[data-state='running'] {
+  color: var(--compose-success);
+}
+
+.compose-project-state[data-state='partial'] {
+  color: var(--compose-warning);
+}
+
+.compose-project-state[data-state='error'] {
+  color: var(--compose-error);
+}
+
+.compose-workspace-detail {
+  padding: clamp(12px, 2vw, 22px);
+  scroll-margin-top: 12px;
+}
+
+.compose-project-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--compose-border);
+}
+
+.compose-project-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  min-width: 0;
+}
+
+.compose-project-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.compose-project-title h3 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.compose-project-title .ant-tag {
+  margin-inline-end: 0;
+}
+
+.compose-directory-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.compose-project-services {
+  min-width: 0;
+  margin-bottom: 16px;
+}
+
+.compose-service-name {
+  display: grid;
+  justify-items: start;
+  min-width: 0;
+}
+
+.compose-service-name > .ant-btn {
+  max-width: 100%;
+  padding-inline: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  height: auto;
+  text-align: start;
+}
+
+.compose-service-name > .ant-typography {
+  max-width: 100%;
+  font-size: 12px;
+}
+
+.compose-container-usage {
+  display: grid;
+  grid-template-columns: max-content;
+  gap: 2px;
+  color: var(--compose-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.compose-container-usage strong {
+  color: var(--compose-ink);
+  font-weight: 500;
+}
+
+.compose-resource-popover {
+  width: min(390px, calc(100vw - 56px));
+}
+
+.compose-resource-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.compose-resource-metrics > div {
+  padding: 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+}
+
+.compose-resource-metrics dt {
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+.compose-resource-metrics dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.compose-save-notice {
+  margin-bottom: 12px;
+}
+
+.compose-file-path {
+  overflow-wrap: anywhere;
+}
+
+.compose-detail-tabs .ant-tabs-extra-content {
+  padding-inline: 6px;
+}
+
+.compose-workspace-detail .compose-code-editor {
+  height: clamp(300px, 49dvh, 650px);
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+@media (max-width: 900px) {
+  .compose-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .compose-project-list {
+    position: static;
+    max-height: min(34dvh, 280px);
+  }
+}
+
+@media (max-width: 767px) {
+  .compose-form {
+    --application-setting-label-width: 84px;
+  }
+
+  .compose-workspace-detail .compose-code-editor {
+    height: max(300px, 58dvh);
+  }
+}

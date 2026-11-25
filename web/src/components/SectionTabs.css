@@ -1,0 +1,110 @@
+.section-tabs-host,
+.section-tabs {
+  min-width: 0;
+}
+
+.section-tabs.ant-tabs-top > .ant-tabs-nav {
+  margin: 0;
+  padding-block: 6px;
+  outline: 1px solid var(--section-tabs-border);
+  outline-offset: -1px;
+  border-radius: var(--section-tabs-radius);
+  background: var(--section-tabs-surface);
+}
+
+/* 启用原生硬件加速横向滚动，禁用 rc-tabs JS touch transform 避免移动端掉帧和触发浏览器后退手势，同时将全部页签直接平铺供滑动选择 */
+.section-tabs.ant-tabs-top > .ant-tabs-nav .ant-tabs-nav-wrap {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+
+.section-tabs.ant-tabs-top
+  > .ant-tabs-nav
+  .ant-tabs-nav-wrap::-webkit-scrollbar {
+  display: none;
+}
+
+.section-tabs.ant-tabs-top > .ant-tabs-nav .ant-tabs-nav-wrap::before,
+.section-tabs.ant-tabs-top > .ant-tabs-nav .ant-tabs-nav-wrap::after {
+  display: none !important;
+}
+
+.section-tabs.ant-tabs-top > .ant-tabs-nav .ant-tabs-nav-list {
+  padding-inline: 8px;
+  transform: none !important;
+  transition: none !important;
+}
+
+.section-tabs.ant-tabs-top > .ant-tabs-nav .ant-tabs-nav-operations {
+  display: none !important;
+}
+
+.section-tabs.ant-tabs-top > .ant-tabs-nav .ant-tabs-tab-hidden {
+  visibility: visible !important;
+  pointer-events: auto !important;
+  position: relative !important;
+  opacity: 1 !important;
+}
+
+.section-tabs.section-tabs-with-content.ant-tabs-top > .ant-tabs-nav {
+  margin-bottom: 16px;
+}
+
+.section-tabs.ant-tabs-top > .ant-tabs-nav::before,
+.section-tabs > .ant-tabs-nav .ant-tabs-ink-bar {
+  display: none;
+}
+
+.section-tabs > .ant-tabs-nav .ant-tabs-tab {
+  padding: 0;
+}
+
+.section-tabs > .ant-tabs-nav .ant-tabs-tab-btn,
+.section-tabs > .ant-tabs-nav .ant-tabs-nav-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.section-tabs
+  > .ant-tabs-nav
+  .ant-tabs-tab:not(.ant-tabs-tab-disabled, .ant-tabs-tab-active):hover
+  .ant-tabs-tab-btn,
+.section-tabs > .ant-tabs-nav .ant-tabs-nav-more:hover {
+  background: var(--section-tabs-hover);
+}
+
+.section-tabs
+  > .ant-tabs-nav
+  .ant-tabs-tab.ant-tabs-tab-active
+  .ant-tabs-tab-btn {
+  background: var(--section-tabs-selected-bg);
+  color: var(--section-tabs-selected-text);
+  text-shadow: none;
+}
+
+.section-tabs > .ant-tabs-nav .ant-tabs-tab-btn:focus-visible,
+.section-tabs > .ant-tabs-nav .ant-tabs-nav-more:focus-visible {
+  outline: 2px solid var(--section-tabs-focus);
+  outline-offset: -2px;
+}
+
+@media (max-width: 576px) {
+  .section-tabs > .ant-tabs-nav .ant-tabs-nav-list {
+    padding-inline: 5px;
+  }
+
+  .section-tabs > .ant-tabs-nav .ant-tabs-tab-btn,
+  .section-tabs > .ant-tabs-nav .ant-tabs-nav-more {
+    min-height: 40px;
+    padding-inline: 10px;
+  }
+}

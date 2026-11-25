@@ -1,0 +1,1323 @@
+/* ============================================================
+   ezpanel Apple Style — 全局苹果风格组件与卡片视觉层
+   对齐 panel-demo 与 Apple HIG 的视觉语言：
+   - 20px 大圆角无框感卡片、顶部玻璃内高光、克制双层阴影
+   - 胶囊按钮 + 苹果浅灰底无边框输入框
+   - 柔和彩色图标方块（Apple Stat Icon Badge）
+   - 柔和语义横幅、无分割线清爽卡片头、tabular-nums 数字排版
+   ============================================================ */
+
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* 通用苹果风细滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(134, 134, 139, 0.28);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(134, 134, 139, 0.48);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 页面切换柔和上浮入场动画 */
+@keyframes appleFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ant-layout-content > * {
+  animation: appleFadeUp 0.26s cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+
+/* ============ 卡片（Apple Card with Glass Rim Highlight） ============ */
+.ant-card {
+  border-radius: 20px !important;
+  border: 1px solid rgba(128, 128, 136, 0.11) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 1px 2px rgba(20, 20, 22, 0.04),
+    0 8px 24px rgba(20, 20, 22, 0.06) !important;
+  transition:
+    transform 0.22s cubic-bezier(0.32, 0.72, 0.28, 1),
+    box-shadow 0.22s cubic-bezier(0.32, 0.72, 0.28, 1),
+    border-color 0.22s cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+
+.panel-theme-dark .ant-card {
+  border-color: rgba(255, 255, 255, 0.07) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 1px 2px rgba(0, 0, 0, 0.24),
+    0 8px 24px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* 去掉传统卡片头部下方的生硬贯穿横线，贴合苹果卡片标题风格 */
+.ant-card > .ant-card-head {
+  border-bottom: none !important;
+  min-height: 46px;
+  padding: 18px 22px 0 !important;
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.015em;
+}
+
+.ant-card-small > .ant-card-head {
+  min-height: 40px;
+  padding: 16px 20px 0 !important;
+}
+
+.ant-card-small
+  > .ant-card-head
+  > .ant-card-head-wrapper
+  > .ant-card-head-title {
+  padding-block: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ant-card-small > .ant-card-body {
+  padding: 16px 20px 18px !important;
+}
+
+/* ============ 输入框与选择器（macOS Spotlight 柔和填充风格） ============ */
+.ant-input-affix-wrapper,
+.ant-input-outlined,
+.ant-input-number-outlined,
+.ant-select-outlined:not(.ant-select-customize-input) .ant-select-selector,
+.ant-picker-outlined {
+  border-radius: 11px;
+  background-color: rgba(118, 118, 128, 0.08) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  transition:
+    background-color 0.16s cubic-bezier(0.32, 0.72, 0.28, 1),
+    border-color 0.16s cubic-bezier(0.32, 0.72, 0.28, 1),
+    box-shadow 0.16s cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+
+.ant-input-affix-wrapper > input.ant-input {
+  background: transparent !important;
+}
+
+.ant-input-affix-wrapper:hover,
+.ant-input-outlined:hover,
+.ant-input-number-outlined:hover,
+.ant-select-outlined:not(.ant-select-disabled):not(
+    .ant-select-customize-input
+  ):hover
+  .ant-select-selector,
+.ant-picker-outlined:hover {
+  background-color: rgba(118, 118, 128, 0.12) !important;
+  border-color: transparent !important;
+}
+
+.ant-input-affix-wrapper-focused,
+.ant-input-affix-wrapper:focus-within,
+.ant-input-outlined:focus,
+.ant-input-outlined:focus-within,
+.ant-input-number-outlined:focus-within,
+.ant-select-focused.ant-select-outlined:not(.ant-select-customize-input)
+  .ant-select-selector,
+.ant-picker-outlined.ant-picker-focused {
+  background-color: var(--ant-color-bg-container) !important;
+  border-color: var(--ant-color-primary) !important;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.18) !important;
+}
+
+/* 搜索输入框（Input.Search）与右侧搜索按钮无缝拼接：靠近按钮一侧无圆角 */
+.ant-input-search
+  > .ant-input-group
+  > .ant-input-affix-wrapper:not(:last-child),
+.ant-input-search > .ant-input-group > .ant-input:not(:last-child),
+.ant-input-group > .ant-input-affix-wrapper:first-child:not(:last-child),
+.ant-input-group > .ant-input:first-child:not(:last-child) {
+  border-start-start-radius: 11px !important;
+  border-end-start-radius: 11px !important;
+  border-start-end-radius: 0 !important;
+  border-end-end-radius: 0 !important;
+}
+
+.ant-input-search > .ant-input-group > .ant-input-group-addon:last-child {
+  background: transparent !important;
+}
+
+.ant-input-search
+  > .ant-input-group
+  > .ant-input-group-addon:last-child
+  .ant-input-search-button {
+  border-start-start-radius: 0 !important;
+  border-end-start-radius: 0 !important;
+  border-start-end-radius: 11px !important;
+  border-end-end-radius: 11px !important;
+  background-color: rgba(118, 118, 128, 0.11) !important;
+  border-color: transparent !important;
+  border-inline-start: 1px solid rgba(128, 128, 136, 0.14) !important;
+  box-shadow: none !important;
+}
+
+.ant-input-search
+  > .ant-input-group
+  > .ant-input-group-addon:last-child
+  .ant-input-search-button:hover {
+  background-color: rgba(118, 118, 128, 0.18) !important;
+  color: var(--ant-color-primary) !important;
+}
+
+/* Space.Compact & Input/InputNumber addonBefore / addonAfter 组合控件圆角与无缝拼接 */
+.ant-space-compact > .ant-space-compact-item:not(:first-child):not(:last-child),
+.ant-space-compact > .ant-btn:not(:first-child):not(:last-child),
+.ant-space-compact
+  > .ant-input-affix-wrapper:not(:first-child):not(:last-child),
+.ant-space-compact > .ant-input:not(:first-child):not(:last-child),
+.ant-space-compact
+  > .ant-select:not(:first-child):not(:last-child)
+  .ant-select-selector {
+  border-radius: 0 !important;
+}
+
+.ant-space-compact > .ant-space-compact-item:first-child:not(:last-child),
+.ant-space-compact > .ant-btn:first-child:not(:last-child),
+.ant-space-compact > .ant-input-affix-wrapper:first-child:not(:last-child),
+.ant-space-compact > .ant-input:first-child:not(:last-child),
+.ant-space-compact
+  > .ant-select:first-child:not(:last-child)
+  .ant-select-selector {
+  border-start-start-radius: 11px !important;
+  border-end-start-radius: 11px !important;
+  border-start-end-radius: 0 !important;
+  border-end-end-radius: 0 !important;
+}
+
+.ant-space-compact > .ant-space-compact-item:last-child:not(:first-child),
+.ant-space-compact > .ant-btn:last-child:not(:first-child),
+.ant-space-compact > .ant-input-affix-wrapper:last-child:not(:first-child),
+.ant-space-compact > .ant-input:last-child:not(:first-child),
+.ant-space-compact
+  > .ant-select:last-child:not(:first-child)
+  .ant-select-selector {
+  border-start-start-radius: 0 !important;
+  border-end-start-radius: 0 !important;
+  border-start-end-radius: 11px !important;
+  border-end-end-radius: 11px !important;
+}
+
+.ant-input-group-wrapper .ant-input-group-addon,
+.ant-input-number-group-wrapper .ant-input-number-group-addon {
+  background-color: rgba(118, 118, 128, 0.12) !important;
+  border-color: transparent !important;
+  color: var(--ant-color-text-secondary) !important;
+}
+
+.ant-input-group-wrapper .ant-input-group-addon:first-child,
+.ant-input-number-group-wrapper .ant-input-number-group-addon:first-child {
+  border-start-start-radius: 11px !important;
+  border-end-start-radius: 11px !important;
+  border-inline-end: 1px solid rgba(128, 128, 136, 0.14) !important;
+}
+
+.ant-input-group-wrapper .ant-input-group-addon:last-child,
+.ant-input-number-group-wrapper .ant-input-number-group-addon:last-child {
+  border-start-end-radius: 11px !important;
+  border-end-end-radius: 11px !important;
+  border-inline-start: 1px solid rgba(128, 128, 136, 0.14) !important;
+}
+
+.ant-input-number-group-wrapper .ant-input-number:first-child:not(:last-child) {
+  border-start-end-radius: 0 !important;
+  border-end-end-radius: 0 !important;
+}
+
+/* ============ 按钮（Apple Pill & Soft Interaction） ============ */
+.ant-btn {
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  transition:
+    background-color 0.15s cubic-bezier(0.32, 0.72, 0.28, 1),
+    border-color 0.15s cubic-bezier(0.32, 0.72, 0.28, 1),
+    color 0.15s cubic-bezier(0.32, 0.72, 0.28, 1),
+    transform 0.15s cubic-bezier(0.32, 0.72, 0.28, 1),
+    box-shadow 0.15s cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+
+.ant-btn:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+/* 主按钮苹果光泽阴影 */
+.ant-btn-primary:not(:disabled) {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 2px 8px rgba(0, 113, 227, 0.28) !important;
+}
+
+/* 默认按钮柔和白卡质感 */
+.ant-btn-default:not(:disabled) {
+  border-color: rgba(128, 128, 136, 0.2) !important;
+}
+
+/* 纯图标按钮保持圆润方块，文字按钮保持胶囊圆角 */
+.ant-btn.ant-btn-icon-only:not(.ant-input-search-button) {
+  border-radius: 10px;
+}
+
+/* 表格与工具栏中的链接按钮做成苹果风柔和底色高亮 */
+.ant-btn-link:not(:disabled) {
+  border-radius: 8px;
+  padding-inline: 6px !important;
+}
+
+.ant-btn-link:not(:disabled):hover {
+  background: rgba(0, 113, 227, 0.1) !important;
+}
+
+.ant-btn-link.ant-btn-dangerous:not(:disabled):hover {
+  background: rgba(255, 59, 48, 0.1) !important;
+}
+
+/* ============ 标签与徽标（Apple Pill Badge） ============ */
+.ant-tag {
+  border-radius: 999px !important;
+  border: none !important;
+  font-weight: 600;
+  font-size: 11.5px;
+  padding-inline: 10px;
+  line-height: 22px;
+}
+
+.ant-tag-success {
+  background: #e8f8ee !important;
+  color: #248a3d !important;
+}
+
+.panel-theme-dark .ant-tag-success {
+  background: #12301f !important;
+  color: #30d158 !important;
+}
+
+.ant-tag-warning {
+  background: #fff4e5 !important;
+  color: #c96e00 !important;
+}
+
+.panel-theme-dark .ant-tag-warning {
+  background: #2c2212 !important;
+  color: #ff9f0a !important;
+}
+
+.ant-tag-error {
+  background: #ffeceb !important;
+  color: #d70015 !important;
+}
+
+.panel-theme-dark .ant-tag-error {
+  background: #301515 !important;
+  color: #ff453a !important;
+}
+
+.ant-tag-processing,
+.ant-tag-blue {
+  background: #eaf2fc !important;
+  color: #0058b0 !important;
+}
+
+.panel-theme-dark .ant-tag-processing,
+.panel-theme-dark .ant-tag-blue {
+  background: #16243a !important;
+  color: #2997ff !important;
+}
+
+/* ============ 提示横幅（Apple Soft Banner） ============ */
+.ant-alert {
+  border: none !important;
+  border-radius: 14px !important;
+  padding: 10px 16px !important;
+}
+
+.ant-alert-info {
+  background: #eaf2fc !important;
+  color: #0058b0 !important;
+}
+.panel-theme-dark .ant-alert-info {
+  background: #16243a !important;
+  color: #64b5f6 !important;
+}
+
+.ant-alert-warning {
+  background: #fff4e5 !important;
+  color: #b25e00 !important;
+}
+.panel-theme-dark .ant-alert-warning {
+  background: #2c2212 !important;
+  color: #ff9f0a !important;
+}
+
+.ant-alert-error {
+  background: #ffeceb !important;
+  color: #c91b11 !important;
+}
+.panel-theme-dark .ant-alert-error {
+  background: #301515 !important;
+  color: #ff453a !important;
+}
+
+.ant-alert-success {
+  background: #e8f8ee !important;
+  color: #1e7e34 !important;
+}
+.panel-theme-dark .ant-alert-success {
+  background: #12301f !important;
+  color: #30d158 !important;
+}
+
+.ant-alert .ant-alert-message {
+  color: inherit !important;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+/* ============ 表格（Apple Clean Table & 实色吸顶列防重叠） ============ */
+.ant-table-wrapper .ant-table {
+  background: transparent !important;
+}
+
+.ant-table-wrapper .ant-table-thead > tr > th {
+  font-weight: 500 !important;
+  font-size: 12px !important;
+  border-bottom: 1px solid rgba(128, 128, 136, 0.14) !important;
+  background: var(--ant-color-bg-container, #ffffff) !important;
+}
+
+.panel-theme-dark .ant-table-wrapper .ant-table-thead > tr > th {
+  background: #1c1f24 !important;
+}
+
+.ant-table-wrapper .ant-table-thead > tr > th::before {
+  display: none !important;
+}
+
+.ant-table-wrapper .ant-table-tbody > tr > td {
+  border-bottom: 1px solid rgba(128, 128, 136, 0.09) !important;
+  transition: background-color 0.15s cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+
+.ant-table-wrapper .ant-table-tbody > tr:last-child > td {
+  border-bottom: none !important;
+}
+
+/* 纵向/横向滚动吸顶表头与右侧固定操作列：必须使用不透明实色背景，防止滑动时文字重叠穿透 */
+.ant-table-wrapper .ant-table-cell-fix-left,
+.ant-table-wrapper .ant-table-cell-fix-right,
+.content-sized-scroll .ant-table-thead > tr > th {
+  background: var(--ant-color-bg-container, #ffffff) !important;
+}
+
+.panel-theme-dark .ant-table-wrapper .ant-table-cell-fix-left,
+.panel-theme-dark .ant-table-wrapper .ant-table-cell-fix-right,
+.panel-theme-dark .content-sized-scroll .ant-table-thead > tr > th {
+  background: #1c1f24 !important;
+}
+
+.ant-table-wrapper .ant-table-tbody > tr:hover > td.ant-table-cell-fix-left,
+.ant-table-wrapper .ant-table-tbody > tr:hover > td.ant-table-cell-fix-right,
+.ant-table-wrapper .ant-table-tbody > tr.ant-table-row:hover > td {
+  background: #f7f7fa !important;
+}
+
+.panel-theme-dark
+  .ant-table-wrapper
+  .ant-table-tbody
+  > tr:hover
+  > td.ant-table-cell-fix-left,
+.panel-theme-dark
+  .ant-table-wrapper
+  .ant-table-tbody
+  > tr:hover
+  > td.ant-table-cell-fix-right,
+.panel-theme-dark
+  .ant-table-wrapper
+  .ant-table-tbody
+  > tr.ant-table-row:hover
+  > td {
+  background: #252930 !important;
+}
+
+/* 网络详情表格：保障名称列最小宽度，避免被多监听 IP 挤压成几个字 */
+.network-process-name .content-sized-cell {
+  min-width: 112px;
+}
+
+.network-process-ips {
+  --content-sized-limit: 196px;
+}
+
+/* ============ 分段控制器 & SectionTabs & 卡片内 Tabs（Apple Pill Tabs） ============ */
+.ant-segmented {
+  padding: 3px !important;
+  border-radius: 11px !important;
+}
+
+.ant-segmented .ant-segmented-item {
+  border-radius: 8px !important;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.ant-segmented .ant-segmented-item-selected {
+  font-weight: 600;
+  box-shadow:
+    0 1px 2px rgba(20, 20, 22, 0.06),
+    0 4px 12px rgba(20, 20, 22, 0.06) !important;
+}
+
+.section-tabs.ant-tabs-top > .ant-tabs-nav {
+  width: 100%;
+  max-width: 100%;
+  min-height: 46px;
+  padding: 5px 6px !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(128, 128, 136, 0.11);
+  outline: none !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 1px 2px rgba(20, 20, 22, 0.04),
+    0 8px 24px rgba(20, 20, 22, 0.06);
+}
+
+.panel-theme-dark .section-tabs.ant-tabs-top > .ant-tabs-nav {
+  border-color: rgba(255, 255, 255, 0.07);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 1px 2px rgba(0, 0, 0, 0.24),
+    0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.section-tabs > .ant-tabs-nav .ant-tabs-nav-list {
+  padding-inline: 2px !important;
+}
+
+.section-tabs > .ant-tabs-nav .ant-tabs-tab-btn,
+.section-tabs > .ant-tabs-nav .ant-tabs-nav-more {
+  min-height: 34px !important;
+  padding: 0 16px !important;
+  border-radius: 10px !important;
+  font-size: 13.5px !important;
+  font-weight: 500;
+  transition:
+    background-color 0.16s cubic-bezier(0.32, 0.72, 0.28, 1),
+    color 0.16s cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+
+.section-tabs
+  > .ant-tabs-nav
+  .ant-tabs-tab.ant-tabs-tab-active
+  .ant-tabs-tab-btn {
+  font-weight: 600;
+}
+
+/* 普通 Tabs（如监控卡片、站点设置弹窗内部 Tabs）精致化 + 原生顺滑横向滑动（防浏览器后退与掉帧） */
+.ant-tabs-top > .ant-tabs-nav .ant-tabs-nav-wrap {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+
+.ant-tabs-top > .ant-tabs-nav .ant-tabs-nav-wrap::-webkit-scrollbar {
+  display: none;
+}
+
+.ant-tabs-top > .ant-tabs-nav .ant-tabs-nav-wrap::before,
+.ant-tabs-top > .ant-tabs-nav .ant-tabs-nav-wrap::after {
+  display: none !important;
+}
+
+.ant-tabs-top > .ant-tabs-nav .ant-tabs-nav-list {
+  transform: none !important;
+  transition: none !important;
+}
+
+.ant-tabs-top > .ant-tabs-nav .ant-tabs-nav-operations {
+  display: none !important;
+}
+
+.ant-tabs-top > .ant-tabs-nav .ant-tabs-tab-hidden {
+  visibility: visible !important;
+  pointer-events: auto !important;
+  position: relative !important;
+  opacity: 1 !important;
+}
+
+.ant-tabs-top > .ant-tabs-nav::before {
+  border-bottom-color: rgba(128, 128, 136, 0.12) !important;
+}
+
+.ant-tabs .ant-tabs-tab {
+  font-weight: 500;
+}
+
+.ant-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+  font-weight: 600;
+}
+
+.ant-tabs .ant-tabs-ink-bar {
+  height: 2.5px !important;
+  border-radius: 3px;
+}
+
+/* 卡片内的二级 type="card" Tabs（如操作日志、防火墙规则分类、Redis DB 切换）美化为苹果风浅底蓝胶囊条，选中态与一级 Tab 保持一致的高辨识度 */
+.ant-card .ant-tabs-card.ant-tabs-top > .ant-tabs-nav {
+  background: rgba(118, 118, 128, 0.045);
+  border: 1px solid rgba(128, 128, 136, 0.12);
+  padding: 4px;
+  border-radius: 13px;
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: 16px;
+}
+
+.panel-theme-dark .ant-card .ant-tabs-card.ant-tabs-top > .ant-tabs-nav {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.ant-card .ant-tabs-card.ant-tabs-top > .ant-tabs-nav::before {
+  display: none !important;
+}
+
+.ant-card .ant-tabs-card.ant-tabs-top > .ant-tabs-nav .ant-tabs-tab {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 9px !important;
+  padding: 6px 15px !important;
+  margin: 0 !important;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ant-color-text-secondary);
+  transition:
+    background-color 0.16s cubic-bezier(0.32, 0.72, 0.28, 1),
+    color 0.16s cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+
+.ant-card
+  .ant-tabs-card.ant-tabs-top
+  > .ant-tabs-nav
+  .ant-tabs-tab:not(.ant-tabs-tab-active):hover {
+  color: var(--ant-color-text);
+  background: rgba(118, 118, 128, 0.07) !important;
+}
+
+.ant-card .ant-tabs-card.ant-tabs-top > .ant-tabs-nav .ant-tabs-tab-active {
+  background: #eaf2fc !important;
+  font-weight: 600;
+}
+
+.ant-card
+  .ant-tabs-card.ant-tabs-top
+  > .ant-tabs-nav
+  .ant-tabs-tab-active
+  .ant-tabs-tab-btn {
+  color: #0071e3 !important;
+  text-shadow: none !important;
+}
+
+.panel-theme-dark
+  .ant-card
+  .ant-tabs-card.ant-tabs-top
+  > .ant-tabs-nav
+  .ant-tabs-tab-active {
+  background: rgba(10, 132, 255, 0.22) !important;
+}
+
+.panel-theme-dark
+  .ant-card
+  .ant-tabs-card.ant-tabs-top
+  > .ant-tabs-nav
+  .ant-tabs-tab-active
+  .ant-tabs-tab-btn {
+  color: #2997ff !important;
+}
+
+/* 表格底部分页器（Pagination）苹果化精修 */
+.ant-pagination .ant-pagination-item {
+  border-radius: 9px !important;
+  border-color: transparent !important;
+  font-weight: 500;
+}
+
+.ant-pagination .ant-pagination-item-active {
+  background: #eaf2fc !important;
+  border-color: transparent !important;
+  font-weight: 600;
+}
+
+.panel-theme-dark .ant-pagination .ant-pagination-item-active {
+  background: #16243a !important;
+}
+
+.ant-pagination .ant-pagination-prev .ant-pagination-item-link,
+.ant-pagination .ant-pagination-next .ant-pagination-item-link {
+  border-radius: 9px !important;
+}
+
+/* 表格底部批量操作栏（Table Footer）融入卡片风格 */
+.ant-table-wrapper .ant-table-footer {
+  background: rgba(118, 118, 128, 0.04) !important;
+  border-radius: 0 0 14px 14px !important;
+  padding: 12px 16px !important;
+}
+
+/* 弹窗内左侧纵向 Tabs（如站点设置、数据库设置、Nginx/PHP设置、容器管理、消息盒子）统一为苹果侧栏胶囊高亮风格，底色与弹窗完全统一 */
+.ant-tabs-left > .ant-tabs-nav {
+  background: transparent !important;
+}
+
+.ant-tabs-left > .ant-tabs-nav .ant-tabs-ink-bar {
+  display: none !important;
+}
+
+.ant-tabs-left > .ant-tabs-nav .ant-tabs-tab {
+  margin: 2px 8px 2px 0 !important;
+  padding: 8px 14px !important;
+  border-radius: 10px !important;
+  transition:
+    background-color 0.16s cubic-bezier(0.32, 0.72, 0.28, 1),
+    color 0.16s cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+
+.ant-tabs-left > .ant-tabs-nav .ant-tabs-tab:hover {
+  background: rgba(118, 118, 128, 0.08);
+}
+
+.ant-tabs-left > .ant-tabs-nav .ant-tabs-tab.ant-tabs-tab-active {
+  background: #eaf2fc;
+}
+
+.panel-theme-dark
+  .ant-tabs-left
+  > .ant-tabs-nav
+  .ant-tabs-tab.ant-tabs-tab-active {
+  background: #16243a;
+}
+
+.ant-tabs-left > .ant-tabs-content-holder {
+  border-left-color: rgba(128, 128, 136, 0.12) !important;
+}
+
+/* ============ 弹窗与抽屉 & 气泡层（Apple Glass Popover & Modal） ============ */
+.ant-modal .ant-modal-content {
+  border-radius: 22px !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 20px 56px rgba(15, 15, 20, 0.24) !important;
+  border: 1px solid rgba(128, 128, 136, 0.14);
+}
+
+.panel-theme-dark .ant-modal .ant-modal-content {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 20px 56px rgba(0, 0, 0, 0.55) !important;
+  border-color: rgba(255, 255, 255, 0.09);
+}
+
+.ant-popover .ant-popover-inner {
+  border-radius: 16px !important;
+  box-shadow: 0 14px 42px rgba(20, 20, 22, 0.16) !important;
+  border: 1px solid rgba(128, 128, 136, 0.14);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+.ant-modal-mask,
+.ant-drawer-mask {
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+/* ============ 概览页卡片与指标精调（Apple Stat Badges & Tiles） ============ */
+/* 概览顶部系统栏与各内页顶部 SectionTabs 保持相同的紧凑高度(46px)、圆角(16px)与水平位置对齐 */
+.ant-card.apple-system-bar {
+  border-radius: 16px !important;
+}
+
+.ant-card.apple-system-bar > .ant-card-body {
+  min-height: 46px;
+  padding: 6px 14px !important;
+  display: flex;
+  align-items: center;
+}
+
+.ant-card.apple-system-bar > .ant-card-body > .ant-flex {
+  width: 100%;
+}
+
+.apple-system-tag.ant-btn {
+  height: 34px !important;
+  font-weight: 500;
+  font-size: 13.5px;
+  border-radius: 10px !important;
+  padding-inline: 10px !important;
+}
+
+/* 资源卡顶部彩色圆角图标方块 */
+.apple-res-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.apple-res-icon--blue {
+  background: #eaf2fc;
+  color: #0071e3;
+}
+.panel-theme-dark .apple-res-icon--blue {
+  background: #16243a;
+  color: #0a84ff;
+}
+
+.apple-res-icon--purple {
+  background: rgba(175, 82, 222, 0.13);
+  color: #af52de;
+}
+.panel-theme-dark .apple-res-icon--purple {
+  background: rgba(191, 90, 242, 0.18);
+  color: #bf5af2;
+}
+
+.apple-res-icon--green {
+  background: #e8f8ee;
+  color: #34c759;
+}
+.panel-theme-dark .apple-res-icon--green {
+  background: #12301f;
+  color: #30d158;
+}
+
+.apple-res-icon--orange {
+  background: #fff4e5;
+  color: #ff9500;
+}
+.panel-theme-dark .apple-res-icon--orange {
+  background: #2c2212;
+  color: #ff9f0a;
+}
+
+.overview-resource-trigger .ant-card {
+  cursor: pointer;
+}
+
+.overview-resource-trigger:hover .ant-card {
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 4px 12px rgba(0, 113, 227, 0.08),
+    0 14px 32px rgba(20, 20, 22, 0.11) !important;
+  border-color: rgba(0, 113, 227, 0.28) !important;
+}
+
+.panel-theme-dark .overview-resource-trigger:hover .ant-card {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 4px 12px rgba(10, 132, 255, 0.16),
+    0 14px 32px rgba(0, 0, 0, 0.45) !important;
+  border-color: rgba(10, 132, 255, 0.4) !important;
+}
+
+/* 概览数字横向排列（26px 大数字 + 标题 + 右箭头） */
+.apple-count-link {
+  text-decoration: none;
+  color: inherit;
+  display: inline-block;
+  padding: 6px 10px;
+  margin: -6px -10px;
+  border-radius: 12px;
+  transition: background-color 0.15s cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+
+.apple-count-link:hover {
+  background-color: rgba(0, 113, 227, 0.07);
+}
+
+.apple-count-link:hover .apple-count-title,
+.apple-count-link:hover .apple-count-arrow {
+  color: var(--ant-color-primary) !important;
+}
+
+.apple-count-arrow {
+  color: var(--ant-color-text-tertiary);
+  align-self: center;
+  transition: transform 0.15s cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+
+.apple-count-link:hover .apple-count-arrow {
+  transform: translateX(2px);
+}
+
+/* 软件与工具：苹果控制中心圆角磁贴 */
+.apple-tool-tile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 13px;
+  background: rgba(118, 118, 128, 0.06);
+  color: var(--ant-color-text);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-decoration: none;
+  transition:
+    background-color 0.16s cubic-bezier(0.32, 0.72, 0.28, 1),
+    transform 0.16s cubic-bezier(0.32, 0.72, 0.28, 1),
+    color 0.16s cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+
+.apple-tool-tile:hover {
+  background: #eaf2fc;
+  color: #0071e3;
+  transform: translateY(-1px);
+}
+
+.panel-theme-dark .apple-tool-tile:hover {
+  background: #16243a;
+  color: #0a84ff;
+}
+
+.apple-tool-tile__icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-grid;
+  place-items: center;
+  background: var(--ant-color-bg-container);
+  color: var(--ant-color-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  flex-shrink: 0;
+}
+
+.overview-content .ant-progress-circle .ant-progress-text {
+  font-weight: 600 !important;
+  font-size: 14px !important;
+  letter-spacing: -0.02em;
+}
+
+/* 服务器信息 Descriptions 同一行显示（标题 + 内容同行对齐） */
+.overview-content .ant-descriptions-small .ant-descriptions-row > th,
+.overview-content .ant-descriptions-small .ant-descriptions-row > td {
+  padding-bottom: 8px;
+}
+
+.overview-content .ant-descriptions-item-label {
+  font-size: 13px;
+  color: var(--ant-color-text-secondary);
+  white-space: nowrap;
+}
+
+.overview-content .ant-descriptions-item-content {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* 软件商店列表中的苹果圆角图标块 */
+.apple-app-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-grid;
+  place-items: center;
+  background: #eaf2fc;
+  color: #0071e3;
+  flex-shrink: 0;
+}
+
+.panel-theme-dark .apple-app-icon {
+  background: #16243a;
+  color: #0a84ff;
+}
+
+/* 移动端终端底部命令输入栏与快捷键条（深色终端内嵌，不受浅色模式白底覆盖） */
+.terminal-mobile-bar .ant-input-outlined {
+  background-color: rgba(255, 255, 255, 0.09) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  color: #f5f5f7 !important;
+}
+
+.terminal-mobile-bar .ant-input-outlined::placeholder {
+  color: rgba(245, 245, 247, 0.45) !important;
+}
+
+.terminal-mobile-bar .ant-input-outlined:focus,
+.terminal-mobile-bar .ant-input-outlined:focus-within {
+  background-color: rgba(255, 255, 255, 0.13) !important;
+  border-color: #0a84ff !important;
+}
+
+/* ============ macOS System Settings 风格设置表单行排版（移除多余二级卡片嵌套） ============ */
+/* 仅保留清晰的行间距与分隔线，不在外层 Card 内再套一层二级背景框 */
+.ant-card-body
+  > .ant-form-horizontal:not(.docker-container-form)
+  > .ant-form-item,
+.ant-tabs-tabpane
+  > .ant-space
+  > .ant-space-item
+  > .ant-form-horizontal
+  > .ant-form-item {
+  margin-bottom: 0;
+  padding: 13px 0;
+  border-bottom: 1px solid rgba(128, 128, 136, 0.1);
+}
+
+.ant-card-body
+  > .ant-form-horizontal:not(.docker-container-form)
+  > .ant-form-item:first-child,
+.ant-tabs-tabpane
+  > .ant-space
+  > .ant-space-item
+  > .ant-form-horizontal
+  > .ant-form-item:first-child {
+  padding-top: 2px;
+}
+
+.ant-card-body
+  > .ant-form-horizontal:not(.docker-container-form)
+  > .ant-form-item:last-child,
+.ant-tabs-tabpane
+  > .ant-space
+  > .ant-space-item
+  > .ant-form-horizontal
+  > .ant-form-item:last-child {
+  border-bottom: none;
+  padding-bottom: 2px;
+}
+
+.ant-card-body
+  > .ant-form-horizontal:not(.docker-container-form)
+  .ant-form-item-label
+  > label,
+.ant-tabs-tabpane
+  > .ant-space
+  > .ant-space-item
+  > .ant-form-horizontal
+  .ant-form-item-label
+  > label {
+  font-weight: 500;
+  color: var(--ant-color-text);
+}
+
+.ant-card-body
+  > .ant-form-horizontal:not(.docker-container-form)
+  .ant-form-item-extra,
+.ant-tabs-tabpane
+  > .ant-space
+  > .ant-space-item
+  > .ant-form-horizontal
+  .ant-form-item-extra {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* ============ 模态框与抽屉内部多行文本框 / 日志框独立上下滚动锁定（防止移动端上下滑动带动底层网页） ============ */
+body:has(.ant-modal-wrap:not([style*='display: none'])),
+body:has(.ant-drawer-open),
+body:has(.panel-log-box-host--fullscreen) {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+}
+
+.ant-modal-wrap,
+.ant-drawer-content-wrapper,
+.ant-modal-body,
+.ant-drawer-body {
+  overscroll-behavior: contain;
+}
+
+/* ============ 移动端日志框右上角悬浮全屏按钮 & 全屏视图 ============ */
+.panel-log-box-host {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.panel-log-box-host--fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2200 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  background: #14161b !important;
+  padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px) !important;
+}
+
+.panel-log-fullscreen-btn {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 15;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(28, 28, 32, 0.78);
+  color: #f5f5f7;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: saturate(180%) blur(12px);
+  -webkit-backdrop-filter: saturate(180%) blur(12px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+}
+
+.panel-log-box-host--fullscreen > .panel-log-fullscreen-btn {
+  top: max(12px, calc(env(safe-area-inset-top, 0px) + 10px));
+  right: 14px;
+  background: #0071e3;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.panel-scroll-box,
+.ant-modal pre,
+.ant-drawer pre,
+.ant-modal textarea,
+.ant-drawer textarea,
+.ant-modal .ant-input-textarea,
+.ant-drawer .ant-input-textarea,
+.ant-modal [role='region'][aria-label='日志内容'],
+.ant-drawer [role='region'][aria-label='日志内容'],
+.logs-output,
+.docker-container-log {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+/* ============ 移动端与窄屏防溢出保护（Mobile Overflow Protection） ============ */
+/* 确保所有普通固定宽度弹窗和抽屉在手机屏幕下自动收缩，但排除带浮动窗口定位的在线文本编辑器 */
+.ant-modal:not(.file-editor-modal) {
+  max-width: calc(100vw - 24px) !important;
+}
+
+.ant-drawer-content-wrapper {
+  max-width: 100vw !important;
+}
+
+@media (max-width: 767px) {
+  /* 手机端卡片与普通弹窗内边距适度收紧，排除在线文本编辑器（其 content padding 必须为 0） */
+  .ant-card > .ant-card-head {
+    padding: 14px 16px 0 !important;
+  }
+
+  .ant-card > .ant-card-body,
+  .ant-card-small > .ant-card-body {
+    padding: 14px 16px !important;
+  }
+
+  .ant-modal:not(.file-editor-modal) .ant-modal-content {
+    padding: 16px !important;
+  }
+
+  /* 防止 Space / Flex 容器中的搜索框、下拉框在手机端因固定像素宽度溢出屏幕 */
+  .ant-space,
+  .ant-space-item {
+    max-width: 100%;
+  }
+
+  .ant-input-search,
+  .ant-select {
+    max-width: 100% !important;
+  }
+
+  /* 水平布局表单在手机端自动转为上下布局，避免 132px labelCol 挤压输入框溢出 */
+  .ant-form-horizontal .ant-form-item-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ant-form-horizontal .ant-form-item-label {
+    flex: 0 0 auto !important;
+    max-width: 100% !important;
+    text-align: start;
+    padding-bottom: 4px;
+  }
+
+  /* 隐藏水平表单中仅用于对齐按钮的空白 label=" " 占位高度 */
+  .ant-form-horizontal .ant-form-item-label > label[title=' '] {
+    display: none;
+  }
+
+  .ant-form-horizontal .ant-form-item-control {
+    flex: 1 1 auto !important;
+    max-width: 100% !important;
+  }
+
+  /* Descriptions 列表在手机端允许换行，防止长路径或固定 label 撑破卡片 */
+  .ant-descriptions-view table {
+    table-layout: auto !important;
+  }
+
+  .ant-descriptions-item-content {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  /* 弹窗内左侧 Tabs 在窄屏下若未自动切换，限制最小宽度防止挤压右侧内容 */
+  .website-settings-tabs.ant-tabs-left > .ant-tabs-nav .ant-tabs-tab {
+    min-width: 88px;
+    padding-inline: 10px;
+  }
+
+  .website-settings-tabs > .ant-tabs-content-holder {
+    padding: 12px 8px;
+  }
+
+  /* 移动端普通 Table（如文件列表、日志列表等未使用 ContentSizedTable 的表格）禁止把列名和单元格挤压成竖排单字 */
+  .ant-table-wrapper .ant-table-content {
+    overflow-x: auto !important;
+  }
+
+  .ant-table-wrapper .ant-table-thead > tr > th,
+  .ant-table-wrapper .ant-table-tbody > tr > td {
+    white-space: nowrap;
+  }
+
+  /* 文件列表的文件名列在手机端保持充足阅读宽度 */
+  .file-list .file-identity {
+    min-width: 180px;
+  }
+
+  /* 移动端居中安全弹窗：所有普通弹窗（排除浮动窗口定位的在线文本编辑器和终端浮动窗）在手机端严格限制在屏幕可视安全区内，防止顶部溢出屏幕外无法关闭；注意必须排除已隐藏([style*="display: none"])的弹窗容器，否则关闭后仍会被强制 display: flex 留在屏幕上 */
+  .ant-modal-wrap:not([style*='display: none']):not(
+      [style*='display:none']
+    ):has(.ant-modal:not(.file-editor-modal):not(.file-terminal-modal)) {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: max(12px, env(safe-area-inset-top, 12px)) 8px
+      max(12px, env(safe-area-inset-bottom, 12px)) !important;
+    overflow: hidden !important;
+  }
+
+  .ant-modal-wrap[style*='display: none'],
+  .ant-modal-wrap[style*='display:none'] {
+    display: none !important;
+    pointer-events: none !important;
+  }
+
+  .ant-modal:not(.file-editor-modal):not(.file-terminal-modal) {
+    top: 0 !important;
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px) !important;
+    max-height: calc(
+      100dvh - 24px - env(safe-area-inset-top, 0px) -
+        env(safe-area-inset-bottom, 0px)
+    ) !important;
+    margin: 0 auto !important;
+    padding-bottom: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .ant-modal:not(.file-editor-modal):not(.file-terminal-modal)
+    > div[tabindex='-1'] {
+    display: flex !important;
+    flex-direction: column !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+  }
+
+  .ant-modal:not(.file-editor-modal):not(.file-terminal-modal)
+    .ant-modal-content {
+    border-radius: 20px !important;
+    max-height: calc(
+      100dvh - 24px - env(safe-area-inset-top, 0px) -
+        env(safe-area-inset-bottom, 0px)
+    ) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    padding: 16px !important;
+  }
+
+  .ant-modal:not(.file-editor-modal):not(.file-terminal-modal)
+    .ant-modal-header {
+    flex-shrink: 0 !important;
+    padding-right: 28px !important;
+  }
+
+  .ant-modal:not(.file-editor-modal):not(.file-terminal-modal)
+    .ant-modal-close {
+    top: 14px !important;
+    inset-inline-end: 14px !important;
+    z-index: 20 !important;
+  }
+
+  .ant-modal:not(.file-editor-modal):not(.file-terminal-modal) .ant-modal-body {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    max-height: calc(
+      100dvh - 116px - env(safe-area-inset-top, 0px) -
+        env(safe-area-inset-bottom, 0px)
+    ) !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  .ant-modal:not(.file-editor-modal):not(.file-terminal-modal)
+    .ant-modal-footer {
+    flex-shrink: 0 !important;
+  }
+
+  /* 站点设置、应用设置、容器管理等内部带有 Tabs 的大弹窗，在移动端允许 Tabs 内容区自然滚动并完整显示全部表单与底部按钮 */
+  .website-settings-tabs.ant-tabs,
+  .app-settings-tabs.ant-tabs,
+  .docker-container-tabs.ant-tabs {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .website-settings-tabs > .ant-tabs-nav,
+  .app-settings-tabs > .ant-tabs-nav,
+  .docker-container-tabs > .ant-tabs-nav {
+    flex-shrink: 0;
+  }
+
+  .website-settings-tabs > .ant-tabs-content-holder,
+  .app-settings-tabs > .ant-tabs-content-holder,
+  .docker-container-tabs > .ant-tabs-content-holder {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+}

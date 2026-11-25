@@ -1,0 +1,11 @@
+.website-settings-tabs > .ant-tabs-content-holder {
+  overflow: auto;
+  padding: 16px;
+}
+.website-settings-tabs > .ant-tabs-nav {
+  margin: 0;
+}
+.website-settings-tabs.ant-tabs-left > .ant-tabs-nav .ant-tabs-tab {
+  min-width: 132px;
+  justify-content: flex-start;
+}

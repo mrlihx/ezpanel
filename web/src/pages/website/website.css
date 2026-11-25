@@ -1,0 +1,56 @@
+.website-list-name {
+  --content-sized-limit: 176px;
+}
+
+.website-status-button.ant-btn {
+  padding-inline: 0;
+}
+
+.website-status-button .ant-tag {
+  margin-inline-end: 0;
+  cursor: inherit;
+}
+
+.website-list-remark .content-sized-cell {
+  display: block;
+  width: auto;
+  min-width: 96px;
+  max-width: none;
+}
+
+.website-list-remark .ant-btn-link {
+  width: 100%;
+  min-height: 34px;
+  padding-block: 5px;
+}
+
+.website-list-remark .ant-btn-link:is(:hover, :focus-visible) {
+  background-color: var(--ant-color-fill-tertiary, rgb(128 128 128 / 10%));
+}
+
+.website-list-root {
+  --content-sized-limit: 224px;
+}
+
+.website-list-name.content-sized-fill {
+  --content-sized-limit: 360px;
+}
+
+.website-list-root.content-sized-fill {
+  --content-sized-limit: 640px;
+}
+
+.website-list-root.content-sized-fill .content-sized-cell {
+  min-width: 160px;
+}
+
+.website-list-root .content-sized-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 767px) {
+  .website-list-root.content-sized-fill .content-sized-cell {
+    min-width: 120px;
+  }
+}

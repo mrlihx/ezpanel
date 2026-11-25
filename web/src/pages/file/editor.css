@@ -1,0 +1,229 @@
+.file-editor-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.file-editor-full .ant-modal-content {
+  border-radius: 0 !important;
+}
+
+.file-editor-modal .ant-modal-content {
+  padding: 0 !important;
+  border-radius: 8px !important;
+  box-shadow:
+    0 6px 16px 0 rgba(0, 0, 0, 0.08),
+    0 3px 6px -4px rgba(0, 0, 0, 0.12),
+    0 9px 28px 8px rgba(0, 0, 0, 0.05) !important;
+}
+
+.file-editor-workspace .ant-input-affix-wrapper,
+.file-editor-workspace .ant-input-outlined {
+  background-color: #1e1e1e !important;
+  border: 1px solid #454545 !important;
+  color: #d4d4d4 !important;
+  border-radius: 6px 0 0 6px !important;
+}
+
+.file-editor-workspace .ant-input-search-button {
+  background-color: #1e1e1e !important;
+  border: 1px solid #454545 !important;
+  border-inline-start: 0 !important;
+  color: #d4d4d4 !important;
+  border-radius: 0 6px 6px 0 !important;
+}
+
+.file-editor-workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  color: var(--editor-ink);
+  background: var(--editor-bg);
+}
+
+.file-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--editor-space-xs);
+  padding: var(--editor-space-sm);
+  border-block: 1px solid var(--editor-border);
+  background: var(--editor-raised);
+}
+
+.file-editor-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.file-editor-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: var(--editor-tree-width);
+  min-width: 0;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--editor-border);
+  background: var(--editor-raised);
+}
+
+.file-editor-directory,
+.file-editor-tree-tools {
+  padding: var(--editor-space-sm) var(--editor-space-md);
+}
+
+.file-editor-tree-search {
+  padding-inline: var(--editor-space-sm);
+  margin-bottom: var(--editor-space-sm);
+}
+
+.file-editor-tree-scroll {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  padding: var(--editor-space-sm);
+}
+
+.file-editor-tree-scroll ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.file-editor-tree-scroll ul.file-editor-tree-group {
+  padding-left: var(--editor-space-lg);
+}
+
+.file-editor-tree-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: var(--editor-space-sm);
+  padding: var(--editor-space-sm) var(--editor-space-xs);
+  border: 0;
+  border-radius: var(--editor-radius);
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-editor-tree-row > span:not(.anticon) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-editor-tree-row .anticon {
+  flex-shrink: 0;
+}
+
+.file-editor-tree-row:hover,
+.file-editor-tree-selected {
+  background: var(--editor-selected);
+}
+
+.file-editor-tree-row:disabled {
+  color: var(--editor-muted);
+  cursor: not-allowed;
+}
+
+.file-editor-code {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.file-editor-code > .ant-tabs > .ant-tabs-nav {
+  margin: 0;
+}
+
+.file-editor-code .ant-tabs-tab {
+  max-width: var(--editor-tab-width);
+}
+
+.file-editor-code .ant-tabs-tab-btn {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-editor-monaco {
+  display: flex;
+  flex: 1;
+  align-items: stretch;
+  justify-content: center;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.file-editor-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--editor-space-sm);
+  padding: var(--editor-space-sm) var(--editor-space-md);
+  border-top: 1px solid var(--editor-border);
+  font-size: var(--editor-small-font);
+  font-variant-numeric: tabular-nums;
+}
+
+.file-editor-status > .ant-typography {
+  flex: 1;
+  min-width: 0;
+  font-size: inherit;
+}
+
+@media (max-width: 992px) {
+  .file-editor-sidebar {
+    width: min(var(--editor-tree-width), 35%);
+  }
+
+  .file-editor-toolbar .ant-btn {
+    padding-inline: var(--editor-space-sm);
+  }
+}
+
+@media (max-width: 640px) {
+  .file-editor-sidebar {
+    width: 40%;
+  }
+
+  .file-editor-directory,
+  .file-editor-tree-scroll {
+    padding-inline: var(--editor-space-xs);
+  }
+}
+
+.file-editor-tree-toggle {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 64px;
+  padding: 0;
+  border: 1px solid var(--editor-border);
+  border-left: 0;
+  border-radius: 0 22px 22px 0;
+  background: #555;
+  color: #fff;
+  cursor: pointer;
+}
+.file-editor-tree-toggle:hover {
+  background: #666;
+}
+.file-editor-tree-toggle:focus-visible {
+  outline: 2px solid var(--editor-accent);
+  outline-offset: 2px;
+}

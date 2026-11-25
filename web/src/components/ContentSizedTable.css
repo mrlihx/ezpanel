@@ -1,0 +1,134 @@
+.content-sized-table th {
+  white-space: nowrap;
+}
+
+.content-sized-table th.content-sized-fill {
+  /* 优先由内容列吸收余宽，其余列仍按各自内容计算。 */
+  width: 100%;
+}
+
+.content-sized-cell {
+  display: inline-block;
+  vertical-align: middle;
+  width: max-content;
+  max-width: var(--content-sized-limit, var(--content-sized-default-limit));
+  overflow-wrap: anywhere;
+}
+
+.content-sized-fill .content-sized-cell,
+.content-sized-table .ant-table-placeholder .content-sized-cell {
+  display: block;
+  width: auto;
+  min-width: 140px;
+}
+
+.content-sized-grow .content-sized-cell {
+  min-width: 110px;
+}
+
+.ant-table-cell-ellipsis .content-sized-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.content-sized-actions .content-sized-cell {
+  max-width: none;
+}
+
+.content-sized-table
+  :is(.ant-table-thead, .ant-table-tbody)
+  > tr
+  > .content-sized-actions {
+  padding-inline: 8px;
+}
+
+.content-sized-actions .ant-btn-link {
+  padding-inline: 0;
+}
+
+.content-sized-remark .content-sized-cell {
+  white-space: pre-wrap;
+}
+
+.content-sized-remark.content-sized-fill .content-sized-cell {
+  max-width: none;
+}
+
+.content-sized-cell > .ant-space {
+  max-width: 100%;
+}
+
+.content-sized-scroll .ant-table-content {
+  /* 同一张表统一计算表头和表身宽度，替代拆表的纵向滚动。 */
+  max-height: calc(var(--content-sized-height) + 46px);
+  overflow-y: auto !important;
+}
+
+.content-sized-scroll .ant-table-thead > tr > th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.content-sized-scroll .ant-table-thead > tr > .ant-table-cell-fix-left,
+.content-sized-scroll .ant-table-thead > tr > .ant-table-cell-fix-right {
+  z-index: 4;
+}
+
+.content-sized-balanced {
+  --content-sized-cell-padding: 12px;
+}
+
+.content-sized-balanced
+  .ant-table-container
+  table
+  > :is(thead, tbody)
+  > tr
+  > .ant-table-cell {
+  padding-inline: var(--content-sized-cell-padding);
+}
+
+.content-sized-balanced
+  .ant-table-thead
+  > tr
+  > th:not(
+    :is(.content-sized-fill, .content-sized-grow, .ant-table-selection-column)
+  ) {
+  width: 1%;
+}
+
+.content-sized-balanced th:is(.content-sized-fill, .content-sized-grow) {
+  width: auto;
+}
+
+.content-sized-balanced .ant-table-cell-ellipsis .content-sized-cell {
+  white-space: nowrap;
+}
+
+.content-sized-balanced .content-sized-actions .content-sized-cell {
+  white-space: nowrap;
+}
+
+.content-sized-balanced
+  .ant-table-container
+  table
+  > :is(thead, tbody)
+  > tr
+  > .content-sized-actions {
+  padding-inline: 8px;
+}
+
+.content-sized-balanced .content-sized-remark .content-sized-cell {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.content-sized-balanced .content-sized-remark .ant-btn-link {
+  padding-inline: 0;
+}
+
+@media (max-width: 767px) {
+  .content-sized-balanced {
+    --content-sized-cell-padding: 8px;
+  }
+}

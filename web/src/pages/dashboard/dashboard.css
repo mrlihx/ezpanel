@@ -1,0 +1,24 @@
+.overview-content > .ant-space-item,
+.overview-content .ant-col {
+  min-width: 0;
+}
+
+.overview-resource-trigger {
+  height: 100%;
+  border-radius: 8px;
+}
+
+.overview-chart {
+  width: 100%;
+  min-width: 0;
+}
+
+@media (width < 576px) {
+  .overview-content {
+    --overview-resource-height: 88px;
+  }
+
+  .overview-monitor > .ant-card-body {
+    padding: 12px;
+  }
+}
