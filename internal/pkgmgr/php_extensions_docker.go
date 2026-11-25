@@ -113,6 +113,8 @@ func (m *Manager) changeDockerPHPExtension(ctx context.Context, id, requested, n
 			cmdParts = append(cmdParts, "docker-php-ext-configure imap --with-kerberos --with-imap-ssl")
 		} else if name == "ldap" {
 			cmdParts = append(cmdParts, "docker-php-ext-configure ldap --with-libdir=lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/")
+		} else if name == "gd" {
+			cmdParts = append(cmdParts, "docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp")
 		}
 		cmdParts = append(cmdParts, "docker-php-ext-install -j2 "+name)
 		if _, err = m.Stream(ctx, 30*time.Minute, nil, log, dockerPath, "exec", containerName, "sh", "-c", strings.Join(cmdParts, " && ")); err != nil {

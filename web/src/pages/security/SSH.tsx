@@ -254,7 +254,6 @@ export default function SSH() {
                   data={query.data}
                   refresh={() => void query.refetch()}
                   onKeys={() => setKeys('root')}
-                  onPassword={(value) => setPassword({ name: 'root', value })}
                 />
               ),
             },
@@ -298,17 +297,17 @@ function BasicSettings({
   data,
   refresh,
   onKeys,
-  onPassword,
 }: {
   data: SSHState;
   refresh: () => void;
   onKeys: () => void;
-  onPassword: (value: string) => void;
 }) {
   const { modal, message } = App.useApp();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [password, setPassword] = useState('');
+  const pubkeyEnabled =
+    Form.useWatch('pubkey', form) ?? data.values.pubkeyauthentication === 'yes';
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <Card title="SSH基础设置" size="small">
@@ -425,7 +424,7 @@ function BasicSettings({
               autoComplete="new-password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="请输入新密码，至少12字节"
+              placeholder="请输入新密码，至少8位字符"
             />
             <Button
               icon={<RotateCw size={15} strokeWidth={1.9} />}
@@ -435,34 +434,55 @@ function BasicSettings({
           </Space.Compact>
           <Button
             type="primary"
-            disabled={!password}
-            onClick={() => onPassword(password)}
+            disabled={password.length < 8}
+            onClick={() => {
+              if (password.length < 8) {
+                message.warning('密码至少需要8位字符');
+                return;
+              }
+              modal.confirm({
+                title: '确认修改 Root 密码？',
+                content:
+                  '将直接修改 Linux 系统 root 账号密码，请妥善保存新密码。',
+                okText: '确认修改',
+                cancelText: '取消',
+                onOk: async () => {
+                  await changeSSHPassword('root', password);
+                  setPassword('');
+                  message.success('Root 密码已修改，请保存新密码');
+                },
+              });
+            }}
           >
             重置
           </Button>
         </Space>
-        <Divider />
-        <Typography.Paragraph strong>Root密钥</Typography.Paragraph>
-        <Space wrap>
-          <Button type="primary" onClick={onKeys}>
-            查看密钥
-          </Button>
-          <Button
-            onClick={async () => {
-              const key = await sshKeys('root');
-              if (key.privateKey) downloadKeys('root', key.privateKey);
-              else onKeys();
-            }}
-          >
-            下载
-          </Button>
-        </Space>
-        <Typography.Paragraph
-          type="secondary"
-          style={{ marginTop: 12, marginBottom: 0 }}
-        >
-          Ed25519登录私钥，请妥善保存。重新生成后，旧的面板密钥将失效。
-        </Typography.Paragraph>
+        {pubkeyEnabled && (
+          <>
+            <Divider />
+            <Typography.Paragraph strong>Root密钥</Typography.Paragraph>
+            <Space wrap>
+              <Button type="primary" onClick={onKeys}>
+                查看密钥
+              </Button>
+              <Button
+                onClick={async () => {
+                  const key = await sshKeys('root');
+                  if (key.privateKey) downloadKeys('root', key.privateKey);
+                  else onKeys();
+                }}
+              >
+                下载
+              </Button>
+            </Space>
+            <Typography.Paragraph
+              type="secondary"
+              style={{ marginTop: 12, marginBottom: 0 }}
+            >
+              Ed25519登录私钥，请妥善保存。重新生成后，旧的面板密钥将失效。
+            </Typography.Paragraph>
+          </>
+        )}
       </Card>
       <SSHProtection port={Number(data.values.port.split(',')[0]) || 22} />
     </Space>
@@ -630,7 +650,7 @@ function Accounts({
           <Form.Item
             name="password"
             label="密码"
-            rules={[{ required: true, min: 12, message: '密码至少12字节' }]}
+            rules={[{ required: true, min: 8, message: '密码至少8位字符' }]}
           >
             <Input.Password autoComplete="new-password" />
           </Form.Item>
@@ -664,7 +684,7 @@ function PasswordModal({
       maskClosable={false}
       onCancel={onClose}
       confirmLoading={saving}
-      okButtonProps={{ disabled: value.length < 12 }}
+      okButtonProps={{ disabled: value.length < 8 }}
       onOk={async () => {
         setSaving(true);
         try {
@@ -677,7 +697,7 @@ function PasswordModal({
       }}
     >
       <Typography.Paragraph>
-        修改的是Linux系统账号密码。至少12字节，不允许冒号和换行。
+        修改的是Linux系统账号密码。至少8位字符，不允许冒号和换行。
       </Typography.Paragraph>
       <Space.Compact style={{ width: '100%' }}>
         <Input.Password

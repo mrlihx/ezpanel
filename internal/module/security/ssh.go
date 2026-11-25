@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"ezpanel/internal/response"
+	"ezpanel/internal/store"
 	"github.com/gin-gonic/gin"
 )
 
@@ -78,6 +80,61 @@ func sshUnit(ctx context.Context) (string, error) {
 	}
 	return "", errors.New("系统未安装OpenSSH服务")
 }
+func sshSocketDropIn(port int) string {
+	var b strings.Builder
+	b.WriteString("[Socket]\nListenStream=\n")
+	fmt.Fprintf(&b, "ListenStream=0.0.0.0:%d\n", port)
+	if _, err := os.Stat("/proc/net/if_inet6"); err == nil {
+		fmt.Fprintf(&b, "ListenStream=[::]:%d\n", port)
+	}
+	return b.String()
+}
+
+func syncSSHFirewallRules(state *firewallState, oldPort, newPort int) {
+	oldStr := strconv.Itoa(oldPort)
+	newStr := strconv.Itoa(newPort)
+	updated := false
+	for i := range state.Rules {
+		row := &state.Rules[i]
+		if row.Kind != "port" || row.Direction != "in" || row.Policy != "allow" {
+			continue
+		}
+		if row.Protocol != "tcp" && row.Protocol != "both" {
+			continue
+		}
+		if row.Ports == oldStr && (row.Origin == "system" || row.Remark == "SSH管理端口") {
+			row.Ports = newStr
+			row.Enabled = true
+			if row.Remark == "" {
+				row.Remark = "SSH管理端口"
+			}
+			updated = true
+		}
+	}
+	covered := false
+	for _, row := range state.Rules {
+		if row.Enabled && row.Kind == "port" && row.Direction == "in" && row.Policy == "allow" && (row.Protocol == "tcp" || row.Protocol == "both") && ruleCoversPort(row.Ports, newPort) {
+			covered = true
+			break
+		}
+	}
+	if !updated && !covered {
+		state.Rules = append(state.Rules, Rule{
+			ID:        store.ID(),
+			Kind:      "port",
+			Protocol:  "tcp",
+			Ports:     newStr,
+			Peer:      "any",
+			Policy:    "allow",
+			Direction: "in",
+			Remark:    "SSH管理端口",
+			Origin:    "system",
+			Enabled:   true,
+			CreatedAt: time.Now().UTC(),
+		})
+	}
+}
+
 func sshRevision() string {
 	main, _ := os.ReadFile(sshMain)
 	managed, _ := os.ReadFile(sshManaged)
@@ -213,15 +270,24 @@ func (m *Module) saveSSH(c *gin.Context) {
 	socketManaged := strings.TrimSpace(socket) == "active" || strings.TrimSpace(socketEnabled) == "enabled"
 	running := strings.TrimSpace(serviceStatus) == "active" || strings.TrimSpace(socket) == "active"
 	firewallChanged := false
+	var oldFirewallState firewallState
 	changed := oldValues["port"] != strconv.Itoa(in.Port)
 	if changed {
+		oldPort, _ := strconv.Atoi(strings.Split(oldValues["port"], ",")[0])
 		state, e := m.readFirewall()
 		if e != nil {
 			restore()
 			fail(c, e)
 			return
 		}
-		// 受管防火墙在SSH重启前读取新配置并放行新端口；原规则保持。
+		oldFirewallState = state
+		oldFirewallState.Rules = append([]Rule(nil), state.Rules...)
+		if !state.Seeded {
+			m.seedManagementRules(&state, []int{in.Port})
+		} else {
+			syncSSHFirewallRules(&state, oldPort, in.Port)
+		}
+		// 受管防火墙在SSH重启前同步把原SSH端口规则更新为新端口，未启用时也落盘保持规则一致。
 		if state.Enabled {
 			if e = m.applyFirewall(ctx, state, m.auth.ClientIP(c)); e != nil {
 				restore()
@@ -229,12 +295,21 @@ func (m *Module) saveSSH(c *gin.Context) {
 				return
 			}
 			firewallChanged = true
+		} else if data, me := json.MarshalIndent(state, "", "  "); me == nil {
+			if we := write(m.firewallPath(), data, 0600); we != nil {
+				restore()
+				fail(c, we)
+				return
+			}
+			firewallChanged = true
 		}
 	}
 	socketPath := "/etc/systemd/system/ssh.socket.d/ezpanel.conf"
 	oldSocket, socketErr := os.ReadFile(socketPath)
-	if changed && socketManaged {
-		err = write(socketPath, []byte(fmt.Sprintf("[Socket]\nListenStream=\nListenStream=%d\n", in.Port)), 0644)
+	desiredSocket := sshSocketDropIn(in.Port)
+	needSocketUpdate := socketManaged && (changed || socketErr != nil || string(oldSocket) != desiredSocket)
+	if needSocketUpdate {
+		err = write(socketPath, []byte(desiredSocket), 0644)
 		if err == nil {
 			_, err = run(ctx, "systemctl", "daemon-reload")
 		}
@@ -248,7 +323,11 @@ func (m *Module) saveSSH(c *gin.Context) {
 			_, err = run(ctx, "systemctl", "start", unit)
 		}
 	} else if running {
-		_, err = run(ctx, "systemctl", "reload-or-restart", unit)
+		if changed {
+			_, err = run(ctx, "systemctl", "restart", unit)
+		} else {
+			_, err = run(ctx, "systemctl", "reload-or-restart", unit)
+		}
 	}
 	if err != nil {
 		restore()
@@ -273,11 +352,11 @@ func (m *Module) saveSSH(c *gin.Context) {
 			recoveryErr = errors.Join(recoveryErr, e)
 		}
 		if firewallChanged {
-			state, e := m.readFirewall()
-			if e == nil {
-				e = m.applyFirewall(recovery, state, m.auth.ClientIP(c))
+			if oldFirewallState.Enabled {
+				recoveryErr = errors.Join(recoveryErr, m.applyFirewall(recovery, oldFirewallState, m.auth.ClientIP(c)))
+			} else if data, me := json.MarshalIndent(oldFirewallState, "", "  "); me == nil {
+				recoveryErr = errors.Join(recoveryErr, write(m.firewallPath(), data, 0600))
 			}
-			recoveryErr = errors.Join(recoveryErr, e)
 		}
 		fail(c, errors.Join(err, recoveryErr))
 		return

@@ -111,14 +111,119 @@ export default function Session({
       textarea.setAttribute('enterkeyhint', 'send');
     }
 
+    const sanitizeCopiedText = (raw: string) =>
+      raw
+        .replace(/\u00a0/g, ' ')
+        // eslint-disable-next-line no-control-regex
+        .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
+
+    const copyToClipboard = (text: string) => {
+      const cleaned = sanitizeCopiedText(text);
+      if (!cleaned) return;
+      const fallbackCopy = () => {
+        const el = document.createElement('textarea');
+        el.value = cleaned;
+        el.setAttribute('readonly', '');
+        el.style.position = 'fixed';
+        el.style.top = '-9999px';
+        el.style.left = '-9999px';
+        el.style.opacity = '0';
+        document.body.appendChild(el);
+        el.focus();
+        el.select();
+        try {
+          document.execCommand('copy');
+        } catch {
+          // 忽略浏览器不支持的情况
+        }
+        document.body.removeChild(el);
+        terminal.focus();
+      };
+      if (navigator.clipboard?.writeText) {
+        void navigator.clipboard.writeText(cleaned).catch(() => {
+          fallbackCopy();
+        });
+      } else {
+        fallbackCopy();
+      }
+    };
+
+    // 统一处理终端复制/粘贴与中断快捷键（兼容 HTTP/HTTPS、中英文输入法及 macOS/Windows）：
+    // - 有选区时：Cmd+C / Ctrl+C / Ctrl+Shift+C 复制到剪贴板并清空选区
+    // - 无选区时：Cmd+C（macOS）和 Ctrl+C（Windows/Linux/macOS）均直接发送 \x03 (^C) 中断
+    terminal.attachCustomKeyEventHandler((event) => {
+      const key = event.key.toLowerCase();
+      const isC = event.code === 'KeyC' || key === 'c';
+      const isV = event.code === 'KeyV' || key === 'v';
+      const hasSelection =
+        terminal.hasSelection() && terminal.getSelection().length > 0;
+      const isSingleMod =
+        (event.metaKey && !event.ctrlKey) || (event.ctrlKey && !event.metaKey);
+
+      if (isC && !event.altKey && isSingleMod) {
+        if (event.shiftKey) {
+          if (event.type === 'keydown' && hasSelection) {
+            event.preventDefault();
+            copyToClipboard(terminal.getSelection());
+            terminal.clearSelection();
+          }
+          return false;
+        }
+        if (event.type === 'keydown') {
+          event.preventDefault();
+          if (hasSelection) {
+            copyToClipboard(terminal.getSelection());
+            terminal.clearSelection();
+          } else {
+            sendRaw('\x03');
+          }
+        }
+        return false;
+      }
+
+      if (isV && !event.altKey && isSingleMod) {
+        if (
+          event.type === 'keydown' &&
+          event.shiftKey &&
+          navigator.clipboard?.readText
+        ) {
+          event.preventDefault();
+          void navigator.clipboard
+            .readText()
+            .then((text) => {
+              if (text) terminal.paste(text);
+            })
+            .catch(() => {});
+        }
+        return false;
+      }
+
+      return true;
+    });
+
+    const container = host.current!;
+    const onCopy = (event: ClipboardEvent) => {
+      const selected = terminal.hasSelection()
+        ? terminal.getSelection()
+        : (window.getSelection()?.toString() ?? '');
+      if (!selected) return;
+      const cleaned = sanitizeCopiedText(selected);
+      if (event.clipboardData) {
+        event.preventDefault();
+        event.clipboardData.setData('text/plain', cleaned);
+      }
+    };
+    container.addEventListener('copy', onCopy);
+
     term.current = terminal;
     fit.current = addon;
     return () => {
+      container.removeEventListener('copy', onCopy);
       terminal.dispose();
       term.current = undefined;
       fit.current = undefined;
     };
-  }, []);
+  }, [sendRaw]);
 
   useEffect(() => {
     const terminal = term.current!;

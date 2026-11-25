@@ -57,6 +57,12 @@ var phpExtensionCatalog = []PHPExtensionOption{
 	{Name: "ldap", Category: "通用扩展", Description: "PHP官方扩展"},
 	{Name: "enchant", Category: "通用扩展", Description: "PHP官方扩展"},
 	{Name: "pspell", Category: "通用扩展", Description: "PHP官方扩展"},
+	{Name: "bcmath", Category: "通用扩展", Description: "PHP官方扩展，任意精度数学计算"},
+	{Name: "gd", Category: "通用扩展", Description: "PHP官方扩展，图像处理库"},
+	{Name: "zip", Category: "通用扩展", Description: "PHP官方扩展，ZIP压缩与解压"},
+	{Name: "soap", Category: "通用扩展", Description: "PHP官方扩展，SOAP协议支持"},
+	{Name: "sockets", Category: "通用扩展", Description: "PHP官方扩展，底层Socket通信"},
+	{Name: "pcntl", Category: "通用扩展", Description: "PHP官方扩展，进程控制支持"},
 	{Name: "bz2", Category: "通用扩展", Description: "PHP官方扩展"},
 	{Name: "sysvshm", Category: "通用扩展", Description: "PHP官方扩展"},
 	{Name: "calendar", Category: "通用扩展", Description: "PHP官方扩展"},
@@ -90,7 +96,7 @@ func PHPExtensionModule(name string) string {
 }
 func phpExtensionSource(id, module string) string {
 	switch module {
-	case "fileinfo", "opcache", "exif", "intl", "xsl", "pgsql", "pdo_pgsql", "readline", "snmp", "ldap", "enchant", "bz2", "sysvshm", "calendar", "gmp", "sysvmsg":
+	case "bcmath", "fileinfo", "opcache", "exif", "intl", "xsl", "pgsql", "pdo_pgsql", "readline", "snmp", "ldap", "enchant", "bz2", "sysvshm", "sysvsem", "sysvmsg", "calendar", "gmp", "gd", "zip", "soap", "sockets", "pcntl", "shmop", "gettext", "dba", "ftp", "tidy", "ffi", "mysqli", "pdo_mysql":
 		return "php"
 	case "imap", "pspell":
 		if phpBranch(id) < "8.4" {

@@ -47,7 +47,13 @@ import {
   TerminalSquare,
   Wrench,
 } from 'lucide-react';
-import { matchPath, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import {
+  Link,
+  matchPath,
+  Outlet,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom';
 import { logout } from '../api/auth';
 import { panelStatus } from '../api/sysinfo';
 import { useAuth } from '../stores/auth';
@@ -699,7 +705,10 @@ export default function MainLayout() {
         }}
         selectedKeys={[selectedKey]}
         items={[
-          ...pages,
+          ...pages.map((item) => ({
+            ...item,
+            label: <Link to={item.key}>{item.label}</Link>,
+          })),
           {
             key: 'logout',
             label: '退出',
@@ -712,14 +721,17 @@ export default function MainLayout() {
                   key: 'plugin-group',
                   type: 'group' as const,
                   label: '扩展应用',
-                  children: pluginMenus,
+                  children: pluginMenus.map((item) => ({
+                    ...item,
+                    label: <Link to={item.key}>{item.label}</Link>,
+                  })),
                 },
               ]
             : []),
         ]}
-        onClick={({ key }) => {
-          setDrawer(false);
+        onClick={({ key, domEvent }) => {
           if (key === 'logout') {
+            setDrawer(false);
             modal.confirm({
               title: '确认退出登录？',
               okText: '退出',
@@ -730,7 +742,21 @@ export default function MainLayout() {
             });
             return;
           }
-          navigate(key);
+          if (
+            domEvent.metaKey ||
+            domEvent.ctrlKey ||
+            domEvent.shiftKey ||
+            domEvent.altKey
+          ) {
+            return;
+          }
+          setDrawer(false);
+          if (!(
+            domEvent.target instanceof HTMLElement &&
+            domEvent.target.closest('a')
+          )) {
+            navigate(key);
+          }
         }}
       />
       <Flex

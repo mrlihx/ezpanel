@@ -31,8 +31,6 @@ import URLFields from './URLFields';
 import './cron.css';
 const CodeEditor = lazy(() => import('../../components/CodeEditor'));
 const allDatabasesValue = ':all';
-const hourSteps = [2, 3, 4, 6, 8, 12];
-const minuteSteps = [2, 3, 4, 5, 6, 10, 12, 15, 20, 30];
 const projectLabels: Record<Website['projectType'], string> = {
   python: 'Python项目',
   go: 'Go项目',
@@ -46,7 +44,7 @@ function scheduleFields(expression?: string) {
     cycle: expression ? 'custom' : 'daily',
     minute: 0,
     hour: 3,
-    step: 2,
+    step: 1,
     week: 1,
     day: 1,
   };
@@ -57,16 +55,18 @@ function scheduleFields(expression?: string) {
   const between = (value: string, min: number, max: number) =>
     /^\d+$/.test(value) && Number(value) >= min && Number(value) <= max;
   const stepOf = (value: string) =>
-    value.startsWith('*/') ? Number(value.slice(2)) : 0;
+    /^\*\/\d+$/.test(value) ? Number(value.slice(2)) : 0;
   const minuteStep = stepOf(minute);
   const hourStep = stepOf(hour);
+  const dayStep = stepOf(day);
   if (month !== '*' || !between(minute, 0, 59)) {
     if (
       hour === '*' &&
       day === '*' &&
       month === '*' &&
       week === '*' &&
-      minuteSteps.includes(minuteStep)
+      minuteStep >= 1 &&
+      minuteStep <= 59
     ) {
       return { ...fields, cycle: 'minutes', step: minuteStep };
     }
@@ -75,12 +75,14 @@ function scheduleFields(expression?: string) {
   fields.minute = Number(minute);
   if (day === '*' && week === '*') {
     if (hour === '*') return { ...fields, cycle: 'hourly' };
-    if (hourSteps.includes(hourStep))
+    if (hourStep >= 1 && hourStep <= 23)
       return { ...fields, cycle: 'hours', step: hourStep };
   }
   if (!between(hour, 0, 23)) return fields;
   fields.hour = Number(hour);
   if (day === '*' && week === '*') return { ...fields, cycle: 'daily' };
+  if (week === '*' && dayStep >= 1 && dayStep <= 31)
+    return { ...fields, cycle: 'days', step: dayStep };
   if (day === '*' && between(week, 0, 6))
     return { ...fields, cycle: 'weekly', week: Number(week) };
   if (week === '*' && between(day, 1, 31))
@@ -167,6 +169,8 @@ export default function CronForm({
     switch (cycle) {
       case 'daily':
         return `${minute} ${hour} * * *`;
+      case 'days':
+        return `${minute} ${hour} */${step} * *`;
       case 'hourly':
         return `${minute} * * * *`;
       case 'hours':
@@ -329,30 +333,55 @@ export default function CronForm({
                 className="cron-cycle-select"
                 options={[
                   { value: 'daily', label: '每天' },
+                  { value: 'days', label: 'N 天' },
                   { value: 'hourly', label: '每小时' },
-                  { value: 'hours', label: '每 N 小时' },
-                  { value: 'minutes', label: '每 N 分钟' },
+                  { value: 'hours', label: 'N 小时' },
+                  { value: 'minutes', label: 'N 分钟' },
                   { value: 'weekly', label: '每周' },
                   { value: 'monthly', label: '每月' },
                   { value: 'custom', label: '自定义' },
                 ]}
                 onChange={(value) => {
                   setCycle(value);
-                  setStep(2);
+                  if (value === 'days') setStep(3);
+                  else if (value === 'hours') setStep(1);
+                  else if (value === 'minutes') setStep(5);
                 }}
               />
-              {(cycle === 'hours' || cycle === 'minutes') && (
-                <Select
+              {cycle === 'days' && (
+                <InputNumber
+                  aria-label="间隔天数"
+                  className="cron-cycle-number"
+                  min={1}
+                  max={31}
+                  precision={0}
                   value={step}
-                  aria-label="执行间隔"
-                  className="cron-cycle-select"
-                  options={(cycle === 'hours' ? hourSteps : minuteSteps).map(
-                    (value) => ({
-                      value,
-                      label: `每 ${value} ${cycle === 'hours' ? '小时' : '分钟'}`,
-                    }),
-                  )}
-                  onChange={setStep}
+                  onChange={(value) => setStep(value ?? 1)}
+                  suffix="天"
+                />
+              )}
+              {cycle === 'hours' && (
+                <InputNumber
+                  aria-label="间隔小时"
+                  className="cron-cycle-number"
+                  min={1}
+                  max={23}
+                  precision={0}
+                  value={step}
+                  onChange={(value) => setStep(value ?? 1)}
+                  suffix="时"
+                />
+              )}
+              {cycle === 'minutes' && (
+                <InputNumber
+                  aria-label="间隔分钟"
+                  className="cron-cycle-number"
+                  min={1}
+                  max={59}
+                  precision={0}
+                  value={step}
+                  onChange={(value) => setStep(value ?? 1)}
+                  suffix="分"
                 />
               )}
               {cycle === 'weekly' && (
@@ -381,17 +410,19 @@ export default function CronForm({
                   className="cron-cycle-number"
                   min={1}
                   max={31}
+                  precision={0}
                   value={day}
                   onChange={(value) => setDay(value ?? 1)}
                   suffix="日"
                 />
               )}
-              {['daily', 'weekly', 'monthly'].includes(cycle) && (
+              {['daily', 'days', 'weekly', 'monthly'].includes(cycle) && (
                 <InputNumber
                   aria-label="小时"
                   className="cron-cycle-number"
                   min={0}
                   max={23}
+                  precision={0}
                   value={hour}
                   onChange={(value) => setHour(value ?? 0)}
                   suffix="时"
@@ -403,6 +434,7 @@ export default function CronForm({
                   className="cron-cycle-number"
                   min={0}
                   max={59}
+                  precision={0}
                   value={minute}
                   onChange={(value) => setMinute(value ?? 0)}
                   suffix="分"

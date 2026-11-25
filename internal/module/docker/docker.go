@@ -7,7 +7,10 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -220,13 +223,46 @@ func (m *Module) createContainer(c *gin.Context) {
 		response.Fail(c, response.Invalid, err.Error())
 		return
 	}
+	// 默认同步宿主机时区（若用户未显式配置 TZ 或挂载 /etc/localtime）
+	envList := append([]string(nil), in.Env...)
+	hasTZ := false
+	for _, kv := range envList {
+		if strings.HasPrefix(kv, "TZ=") {
+			hasTZ = true
+			break
+		}
+	}
+	if !hasTZ {
+		if tz := pkgmgr.HostTimezone(m.cfg.Current().Timezone); tz != "" {
+			envList = append(envList, "TZ="+tz)
+		}
+	}
+	hasLocaltime := false
+	for _, mt := range mounts {
+		if mt["Target"] == "/etc/localtime" {
+			hasLocaltime = true
+			break
+		}
+	}
+	if !hasLocaltime && runtime.GOOS == "linux" {
+		if resolved, err := filepath.EvalSymlinks("/etc/localtime"); err == nil {
+			if info, err := os.Stat(resolved); err == nil && !info.IsDir() {
+				mounts = append(mounts, map[string]any{
+					"Type":     "bind",
+					"Source":   resolved,
+					"Target":   "/etc/localtime",
+					"ReadOnly": true,
+				})
+			}
+		}
+	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), time.Minute)
 	defer cancel()
 	var out struct {
 		ID       string   `json:"Id"`
 		Warnings []string `json:"Warnings"`
 	}
-	body := gin.H{"Image": in.Image, "Cmd": in.Command, "Env": in.Env, "ExposedPorts": exposed, "HostConfig": gin.H{"PortBindings": ports, "Mounts": mounts, "NetworkMode": in.Network, "RestartPolicy": gin.H{"Name": in.Restart}, "Memory": in.MemoryMB * 1024 * 1024, "NanoCpus": int64(in.CPUs * 1e9)}}
+	body := gin.H{"Image": in.Image, "Cmd": in.Command, "Env": envList, "ExposedPorts": exposed, "HostConfig": gin.H{"PortBindings": ports, "Mounts": mounts, "NetworkMode": in.Network, "RestartPolicy": gin.H{"Name": in.Restart}, "Memory": in.MemoryMB * 1024 * 1024, "NanoCpus": int64(in.CPUs * 1e9)}}
 	if err := m.json(ctx, "POST", "/containers/create?name="+url.QueryEscape(in.Name), body, &out); err != nil {
 		fail(c, err)
 		return

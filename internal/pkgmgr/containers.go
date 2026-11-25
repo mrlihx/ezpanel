@@ -498,6 +498,53 @@ func (m *Manager) changeContainer(ctx context.Context, id, version string, upgra
 	return m.dockerStatus(ctx, id)
 }
 
+// HostTimezone 检测宿主机当前 IANA 时区名称（如 Asia/Shanghai），检测不到时回退到 fallback。
+func HostTimezone(fallback string) string {
+	if raw, err := os.ReadFile("/etc/timezone"); err == nil {
+		if tz := strings.TrimSpace(string(raw)); tz != "" {
+			return tz
+		}
+	}
+	if target, err := filepath.EvalSymlinks("/etc/localtime"); err == nil {
+		if _, after, ok := strings.Cut(filepath.ToSlash(target), "/zoneinfo/"); ok && after != "" {
+			return after
+		}
+	}
+	if tz := strings.TrimSpace(os.Getenv("TZ")); tz != "" {
+		return tz
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func (m *Manager) hostTimezoneDockerArgs(existing []string) []string {
+	hasTZ := false
+	hasLocaltime := false
+	for i, arg := range existing {
+		if arg == "-e" && i+1 < len(existing) && strings.HasPrefix(existing[i+1], "TZ=") {
+			hasTZ = true
+		} else if strings.HasPrefix(arg, "-eTZ=") || strings.HasPrefix(arg, "--env=TZ=") {
+			hasTZ = true
+		}
+		if strings.Contains(arg, "/etc/localtime") {
+			hasLocaltime = true
+		}
+	}
+	var extra []string
+	if !hasTZ {
+		if tz := HostTimezone(m.cfg.Current().Timezone); tz != "" {
+			extra = append(extra, "-e", "TZ="+tz)
+		}
+	}
+	if !hasLocaltime && runtime.GOOS == "linux" {
+		if resolved, err := filepath.EvalSymlinks("/etc/localtime"); err == nil {
+			if info, err := os.Stat(resolved); err == nil && !info.IsDir() {
+				extra = append(extra, "-v", resolved+":/etc/localtime:ro")
+			}
+		}
+	}
+	return extra
+}
+
 func (m *Manager) createServiceContainer(ctx context.Context, action []string, name, version, platform string, args []string, image string, command []string) error {
 	dockerArgs := append(action, "--pull=never", "--name", name, "--label", "ezpanel.managed=true", "--label", "ezpanel.version="+version, "--restart", "unless-stopped", "--log-opt", "max-size=10m", "--log-opt", "max-file=3", "--platform", platform)
 	// OpenResty 和升级验证容器分别通过参数指定 host 和 none。
@@ -507,6 +554,7 @@ func (m *Manager) createServiceContainer(ctx context.Context, action []string, n
 		}
 		dockerArgs = append(dockerArgs, "--network", ManagedNetwork)
 	}
+	dockerArgs = append(dockerArgs, m.hostTimezoneDockerArgs(args)...)
 	dockerArgs = append(dockerArgs, args...)
 	dockerArgs = append(dockerArgs, image)
 	_, err := m.docker(ctx, 60*time.Second, append(dockerArgs, command...)...)

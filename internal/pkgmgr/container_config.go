@@ -219,7 +219,15 @@ php_admin_value[upload_tmp_dir] = %s/tmp
 php_admin_value[upload_max_filesize] = 64M
 php_admin_value[post_max_size] = 64M
 `, containerPHPFPMErrorLog, filepath.Join(socketDir, "fpm.sock"), filepath.Join(socketDir, "phpmyadmin.sock"), appRoot, pmaData, filepath.Dir(m.MySQLSocket()), pmaData, pmaData)
-		defaultPHPIni := "upload_max_filesize = 50M\npost_max_size = 50M\nmax_execution_time = 100\ndisable_functions = passthru,exec,system,putenv,chroot,chgrp,chown,shell_exec,popen,proc_open,pcntl_exec,ini_alter,ini_restore,dl,openlog,syslog,readlink,symlink,popepassthru,pcntl_alarm,pcntl_fork,pcntl_waitpid,pcntl_wait,pcntl_wifexited,pcntl_wifstopped,pcntl_wifsignaled,pcntl_wifcontinued,pcntl_wexitstatus,pcntl_wtermsig,pcntl_wstopsig,pcntl_signal,pcntl_signal_dispatch,pcntl_get_last_error,pcntl_strerror,pcntl_sigprocmask,pcntl_sigwaitinfo,pcntl_sigtimedwait,pcntl_getpriority,pcntl_setpriority,imap_open,apache_setenv\n"
+		tz := HostTimezone(m.cfg.Current().Timezone)
+		if tz == "" {
+			tz = "UTC"
+		}
+		defaultPHPIni := fmt.Sprintf("date.timezone = %s\nupload_max_filesize = 50M\npost_max_size = 50M\nmax_execution_time = 100\ndisable_functions = passthru,exec,system,putenv,chroot,chgrp,chown,shell_exec,popen,proc_open,pcntl_exec,ini_alter,ini_restore,dl,openlog,syslog,readlink,symlink,popepassthru,pcntl_alarm,pcntl_fork,pcntl_waitpid,pcntl_wait,pcntl_wifexited,pcntl_wifstopped,pcntl_wifsignaled,pcntl_wifcontinued,pcntl_wexitstatus,pcntl_wtermsig,pcntl_wstopsig,pcntl_signal,pcntl_signal_dispatch,pcntl_get_last_error,pcntl_strerror,pcntl_sigprocmask,pcntl_sigwaitinfo,pcntl_sigtimedwait,pcntl_getpriority,pcntl_setpriority,imap_open,apache_setenv\n", tz)
+		tzIniPath := filepath.Join(phpDir, "timezone.ini")
+		if err := os.WriteFile(tzIniPath, []byte("date.timezone = "+tz+"\n"), 0644); err != nil {
+			return nil, err
+		}
 		for name, content := range map[string]string{"php-fpm.conf": fpm, "php.ini": defaultPHPIni} {
 			path := filepath.Join(phpDir, name)
 			if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
@@ -230,6 +238,7 @@ php_admin_value[post_max_size] = 64M
 		}
 		return []string{
 			"--mount", mount(phpDir, phpDir, true),
+			"--mount", mount(tzIniPath, "/usr/local/etc/php/conf.d/99-ezpanel-timezone.ini", true),
 			"--mount", mount(socketDir, socketDir, false),
 			"--mount", mount(logDir, ContainerLogDir, false),
 			"--mount", mount(siteRoot, siteRoot, false),

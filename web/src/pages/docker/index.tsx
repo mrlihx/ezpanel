@@ -420,7 +420,7 @@ export default function DockerPage() {
           <TerminalModal
             cwd="/root"
             title={`Docker容器终端 · ${terminal.slice(0, 12)}`}
-            initialInput={`docker exec -it ${terminal} /bin/sh; exit\r`}
+            initialInput={`printf '\\033[?2004l'; docker exec -it -e TERM=xterm-256color -e 'PS1=\\u@\\h:\\w\\$ ' ${terminal} sh -c 'if command -v bash >/dev/null 2>&1; then exec bash; elif command -v ash >/dev/null 2>&1; then exec ash; else exec sh; fi'; exit`}
             onClose={() => setTerminal(undefined)}
           />
         </Suspense>

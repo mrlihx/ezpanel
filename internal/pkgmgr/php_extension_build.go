@@ -34,6 +34,10 @@ func phpExtensionDependencies(name string, apt bool) []string {
 		"smbclient": {{"libsmbclient-devel"}, {"libsmbclient-dev"}},
 		"event":     {{"libevent-devel", "openssl-devel"}, {"libevent-dev", "libssl-dev"}},
 		"swoole":    {{"openssl-devel", "libcurl-devel"}, {"libssl-dev", "libcurl4-openssl-dev"}},
+		"zip":       {{"libzip-devel"}, {"libzip-dev"}},
+		"soap":      {{"libxml2-devel"}, {"libxml2-dev"}},
+		"tidy":      {{"libtidy-devel"}, {"libtidy-dev"}},
+		"ffi":       {{"libffi-devel"}, {"libffi-dev"}},
 	}
 	row := packages[name]
 	if apt {

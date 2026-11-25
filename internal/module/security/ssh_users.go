@@ -38,7 +38,7 @@ func (m *Module) sshUsers(c *gin.Context) {
 	response.OK(c, gin.H{"list": rows})
 }
 func passwordValid(password string) bool {
-	return len(password) >= 12 && len(password) <= 1024 && !strings.ContainsAny(password, "\x00\r\n:")
+	return len(password) >= 8 && len(password) <= 1024 && !strings.ContainsAny(password, "\x00\r\n:")
 }
 func setPassword(c *gin.Context, name, password string) error {
 	bin, err := executor.LookPath("chpasswd")
@@ -60,7 +60,7 @@ func (m *Module) sshPassword(c *gin.Context) {
 	}
 	name := c.Param("name")
 	if !usernamePattern.MatchString(name) || !passwordValid(in.Password) {
-		response.Fail(c, response.Invalid, "账号无效，密码需12至1024字节且不能含冒号、换行")
+		response.Fail(c, response.Invalid, "账号无效，密码需8至1024字节且不能含冒号、换行")
 		return
 	}
 	if _, err := userHome(name); err != nil {
@@ -85,7 +85,7 @@ func (m *Module) createSSHUser(c *gin.Context) {
 		return
 	}
 	if !usernamePattern.MatchString(in.Name) || !passwordValid(in.Password) || in.Shell != "/bin/bash" && in.Shell != "/bin/sh" {
-		response.Fail(c, response.Invalid, "账号、密码或Shell无效，密码至少12字节")
+		response.Fail(c, response.Invalid, "账号、密码或Shell无效，密码至少8字节")
 		return
 	}
 	m.mu.Lock()
