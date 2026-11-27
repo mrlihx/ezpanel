@@ -1,5 +1,5 @@
 import { lazy, useEffect, useState } from 'react';
-import { Button, Result, Skeleton } from 'antd';
+import { Button, Result, Skeleton, Space } from 'antd';
 import {
   Navigate,
   Outlet,
@@ -7,6 +7,7 @@ import {
   createBrowserRouter,
   createRoutesFromElements,
   useLocation,
+  useRouteError,
 } from 'react-router-dom';
 import { me } from '../api/auth';
 import { APIError } from '../api/client';
@@ -95,9 +96,30 @@ function RequireAuth() {
     />
   );
 }
+function RouteError() {
+  const err = useRouteError();
+  const detail =
+    err instanceof Error ? err.message : '页面渲染遇到意外错误，请刷新重试。';
+  return (
+    <Result
+      status="error"
+      title="页面渲染异常"
+      subTitle={detail}
+      extra={
+        <Space>
+          <Button type="primary" onClick={() => window.location.reload()}>
+            刷新页面
+          </Button>
+          <Button onClick={() => window.location.assign('/')}>返回首页</Button>
+        </Space>
+      }
+    />
+  );
+}
+
 export const router = createBrowserRouter(
   createRoutesFromElements(
-    <>
+    <Route errorElement={<RouteError />}>
       <Route path="/login" element={<Login />} />
       <Route element={<RequireAuth />}>
         <Route element={<MainLayout />}>
@@ -134,6 +156,6 @@ export const router = createBrowserRouter(
           <Route path="*" element={<RouteNotFound />} />
         </Route>
       </Route>
-    </>,
+    </Route>,
   ),
 );

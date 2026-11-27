@@ -257,6 +257,7 @@ export default function Overview() {
       <div className="waf-chart-grid">
         <Card title="攻击拦截趋势">
           <ReactECharts
+            echarts={echarts}
             option={trendOption}
             style={{ height: LAYOUT.chartHeight }}
             notMerge
@@ -265,6 +266,7 @@ export default function Overview() {
         <Card title="攻击类型分布">
           {data.ruleGroups.length > 0 ? (
             <ReactECharts
+              echarts={echarts}
               option={pieOption}
               style={{ height: LAYOUT.chartHeight }}
               notMerge
