@@ -6,6 +6,11 @@ export function containerOwnership(
     if (labels['ezpanel.project'] === 'true') {
       return {
         label: '网站项目',
+        siteId:
+          labels['ezpanel.project-id'] ||
+          /^\/?ezpanel-site-([a-f0-9]{32})(?:-(?:previous|failed))?$/.exec(
+            name,
+          )?.[1],
         link: '/websites',
         action: '前往网站项目设置',
         removal: '请优先在网站项目中管理或删除，直接删除容器会保留项目记录。',
@@ -23,6 +28,9 @@ export function containerOwnership(
       link: params ? `/apps?${params}` : '/apps',
       action: '前往应用商店设置',
       removal: '请优先在应用商店卸载。直接删除会保留应用记录和配置。',
+      deleteFromAppStore: ['mysql', 'postgresql', 'mongodb', 'redis'].includes(
+        app ?? '',
+      ),
     };
   }
   const project = labels?.['com.docker.compose.project'];

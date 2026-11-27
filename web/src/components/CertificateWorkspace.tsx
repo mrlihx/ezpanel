@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import ResourceActions, {
+  useResourceActions,
+} from '../plugins/ResourceActions';
 import {
   Alert,
   App,
@@ -32,6 +35,7 @@ type Props = {
   mode: 'free' | 'folder';
   defaultDomains?: string[];
   siteId?: string;
+  autoTempSite?: boolean;
   onDeploy: (id: string) => Promise<void | false>;
 };
 export default function CertificateWorkspace(props: Props) {
@@ -39,6 +43,7 @@ export default function CertificateWorkspace(props: Props) {
   return <CertificateFolder {...props} />;
 }
 function CertificateFolder({ onDeploy, defaultDomains, siteId }: Props) {
+  const pluginActions = useResourceActions('certificates');
   const { message, modal } = App.useApp();
   const client = useQueryClient();
   const [page, setPage] = useState(1);
@@ -207,6 +212,9 @@ function CertificateFolder({ onDeploy, defaultDomains, siteId }: Props) {
                     续签
                   </Button>
                 )}
+                <ResourceActions
+                  items={pluginActions(row.id, row.domains.join('、'))}
+                />
                 <Button
                   type="link"
                   size="small"

@@ -75,7 +75,6 @@ export default function ContentSizedTable<Row extends object>({
     return {
       ...column,
       width: undefined,
-      minWidth: undefined,
       className: [
         column.className,
         column === fill && 'content-sized-fill',

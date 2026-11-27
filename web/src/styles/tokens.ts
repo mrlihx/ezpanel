@@ -47,7 +47,7 @@ export const LAYOUT = {
   fileSizeWidth: 110,
   fileTimeWidth: 180,
   fileRemarkWidth: 180,
-  fileActionsWidth: 88,
+  fileActionsWidth: 68,
   fileTableHeight:
     'max(240px, calc(var(--panel-content-height, 100dvh) - 360px))',
   fileToolbarPrimaryWidth: 120,
@@ -75,7 +75,6 @@ export const LAYOUT = {
   messageBoxWidth: 1120,
   messageBoxHeight: '65dvh',
   appSearchWidth: 280,
-  pluginConfigWidth: 480,
 } as const;
 export const MONO_FONT =
   "ui-monospace, 'SF Mono', 'JetBrains Mono', SFMono-Regular, Menlo, Consolas, monospace";
@@ -247,8 +246,3 @@ export const getTheme = (dark: boolean): ThemeConfig => ({
 
 export const getUsageLevel = (p: number) =>
   p >= 90 ? 'colorError' : p >= 70 ? 'colorWarning' : 'colorSuccess';
-
-export const SIDER_COLORS = {
-  background: '#FFFFFF',
-  foreground: '#1D1D1F',
-};

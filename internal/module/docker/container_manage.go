@@ -285,6 +285,7 @@ func (m *Module) recreateContainer(c *gin.Context) {
 			image = old.Image
 		}
 		if in.Image != "" && in.Pull {
+			image = imagePullReference(image)
 			log.Line("拉取目标镜像 " + image)
 			if err := m.stream(ctx, "/images/create?fromImage="+url.QueryEscape(image), authHeader, log.Line); err != nil {
 				return nil, err

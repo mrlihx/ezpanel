@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"ezpanel/internal/response"
@@ -56,6 +57,7 @@ func (m *Module) noSQLRoutes(r *gin.RouterGroup) {
 	n.POST("/connections/:connection/databases", m.createNoSQLDatabase)
 	n.DELETE("/connections/:connection/databases/:database", m.dropNoSQLDatabase)
 	n.PUT("/connections/:connection/databases/:database/metadata", m.mongoMetadata)
+	n.POST("/connections/:connection/databases/:database/account", m.createMongoDatabaseAccount)
 	n.POST("/connections/:connection/databases/:database/password/reveal", m.revealMongoPassword)
 	n.POST("/connections/:connection/batch", m.mongoBatch)
 	n.GET("/connections/:connection/collections", m.mongoCollections)
@@ -490,9 +492,17 @@ func (m *Module) createNoSQLDatabase(c *gin.Context) {
 	if !response.Bind(c, &in) {
 		return
 	}
+	autoUser := in.Collection == "" && in.Username == "" && in.Password == ""
+	if in.Collection == "" {
+		in.Collection = "init"
+	}
 	if !mongoDatabaseName.MatchString(in.Name) || !mongoCollectionName.MatchString(in.Collection) || in.Name == "admin" || in.Name == "local" || in.Name == "config" {
 		response.Fail(c, response.Invalid, "数据库或初始集合名称无效")
 		return
+	}
+	if autoUser {
+		in.Username = in.Name
+		in.Password = rand.Text()
 	}
 	if (in.Username == "") != (in.Password == "") || len(in.Username) > 128 || strings.ContainsRune(in.Username, 0) || len(in.Password) > 4096 || strings.ContainsRune(in.Password, 0) {
 		response.Fail(c, response.Invalid, "专属用户名和密码需同时填写，用户名最多128字节")
@@ -517,15 +527,8 @@ func (m *Module) createNoSQLDatabase(c *gin.Context) {
 			return err
 		}
 		if in.Username != "" {
-			encrypted, err := store.Encrypt(m.cfg.AESKey, in.Password)
-			if err != nil {
-				return err
-			}
-			if err = client.Database(in.Name).RunCommand(ctx, bson.D{{Key: "createUser", Value: in.Username}, {Key: "pwd", Value: in.Password}, {Key: "roles", Value: bson.A{bson.D{{Key: "role", Value: "readWrite"}, {Key: "db", Value: in.Name}}}}}).Err(); err != nil {
-				return errors.New("数据库已创建，但专属账号创建失败，请检查用户管理权限")
-			}
-			if err = m.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&store.MongoMetadata{ConnectionID: c.Param("connection"), Name: in.Name, Username: in.Username, PasswordEnc: encrypted}).Error; err != nil {
-				return errors.New("数据库和账号已创建，但面板账号记录保存失败")
+			if err := m.mongoCreateAccount(ctx, client, c.Param("connection"), in.Name, in.Username, in.Password); err != nil {
+				return fmt.Errorf("数据库已创建，%w；可在数据库列表补建账号", err)
 			}
 		}
 		record := databaseRecord{Engine: "mongodb", ServerID: c.Param("connection"), Name: in.Name, CreatedAt: time.Now().UTC()}

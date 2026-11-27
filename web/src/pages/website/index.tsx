@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   App,
@@ -10,7 +10,6 @@ import {
   Flex,
   Input,
   Modal,
-  Result,
   Skeleton,
   Space,
   Tooltip,
@@ -20,17 +19,26 @@ import {
 } from 'antd';
 import { Plus, RotateCw, Settings } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import {
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom';
 import ContentSizedTable from '../../components/ContentSizedTable';
+import ApplicationInstallGuide from '../../components/ApplicationInstallGuide';
 import { request } from '../../api/client';
+import ResourceActions, {
+  useResourceActions,
+} from '../../plugins/ResourceActions';
 import {
   deleteWebsite,
   environment,
+  website,
   websiteColumns,
   saveWebsiteColumns,
   saveWebsite,
   websites,
-  website,
   type SiteInput,
   type Website,
 } from '../../api/website';
@@ -78,6 +86,8 @@ const projectDialogs = {
 export default function WebsitePage() {
   const fixedActions = Grid.useBreakpoint().lg ? 'right' : undefined;
   const navigate = useNavigate();
+  const pluginActions = useResourceActions('sites');
+  const location = useLocation();
   const client = useQueryClient();
   const { message, modal } = App.useApp();
   const [searchParams] = useSearchParams();
@@ -98,25 +108,43 @@ export default function WebsitePage() {
   const [size, setSize] = useState(20);
   const [keyword, setKeyword] = useState('');
   const [adding, setAdding] = useState<Website['projectType']>();
-  const detail = useQuery({
+  const [openedSettings, setSettings] = useState<{
+    id: string;
+    projectType: Website['projectType'];
+    tab?: string;
+  }>();
+  const linkedSite = useQuery({
     queryKey: ['website', siteId],
     queryFn: () => website(siteId!),
     enabled: !!siteId && !route.invalid,
   });
-  function setSettings(settings: {
-    id: string;
-    projectType: Website['projectType'];
-    tab?: string;
-  }) {
-    const tail = settings.tab ? `/${settings.tab}` : '';
-    void navigate(
-      `/websites/${settings.projectType}/${encodeURIComponent(settings.id)}${tail}`,
-    );
-  }
+  const settings = siteId
+    ? {
+        id: siteId,
+        projectType: linkedSite.data?.projectType ?? projectType,
+        tab: siteTab,
+      }
+    : openedSettings;
+  useEffect(() => {
+    const id = location.state?.openWebsiteSettings;
+    if (typeof id !== 'string' || route.invalid || route.loading) return;
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setSettings({ id, projectType, tab: 'runtime' });
+      // 消费跨页打开请求，避免刷新或浏览器返回时再次打开窗口。
+      void navigate(location.pathname + location.search, {
+        replace: true,
+        state: null,
+      });
+    });
+    return () => {
+      active = false;
+    };
+  }, [location, navigate, projectType, route.invalid, route.loading]);
   const AddProjectModal = adding ? projectDialogs[adding].add : undefined;
-  const actualType = detail.data?.projectType ?? projectType;
-  const ProjectSettingsModal = siteId
-    ? projectDialogs[actualType]?.settings
+  const ProjectSettingsModal = settings
+    ? projectDialogs[settings.projectType].settings
     : undefined;
   const [deleting, setDeleting] = useState<Website>();
   const [backups, setBackups] = useState<Website>();
@@ -453,6 +481,7 @@ export default function WebsitePage() {
           >
             删除
           </Button>
+          <ResourceActions items={pluginActions(row.id, row.name)} />
         </Space>
       ),
     },
@@ -479,8 +508,7 @@ export default function WebsitePage() {
       style={{ marginBottom: SPACING.lg }}
     />
   );
-  if (route.invalid || (detail.data && detail.data.projectType !== projectType))
-    return <RouteNotFound back="/websites" />;
+  if (route.invalid) return <RouteNotFound back="/websites" />;
   if (route.loading) return <Skeleton active />;
   return (
     <>
@@ -488,6 +516,7 @@ export default function WebsitePage() {
         activeKey={projectType}
         style={{ marginBottom: SPACING.lg }}
         onChange={(key) => {
+          setSettings(undefined);
           void route.selectTab(key);
           setPage(1);
         }}
@@ -516,20 +545,11 @@ export default function WebsitePage() {
           action={<Button onClick={() => void env.refetch()}>重新检测</Button>}
         />
       ) : !env.data?.installed ? (
-        <Result
-          status="info"
-          title="未检测到 OpenResty"
-          subTitle="在应用商店选择官方版本安装，保留已有配置。"
-          extra={
-            <Space>
-              <Button type="primary" onClick={() => install()}>
-                {env.data?.activeTaskId
-                  ? '查看安装进度'
-                  : '选择版本安装 OpenResty'}
-              </Button>
-              <Button onClick={() => void env.refetch()}>重新检测</Button>
-            </Space>
-          }
+        <ApplicationInstallGuide
+          name="OpenResty"
+          install={install}
+          onDetect={() => void env.refetch()}
+          installText={env.data?.activeTaskId ? '查看安装进度' : undefined}
         />
       ) : (
         <>
@@ -799,21 +819,24 @@ export default function WebsitePage() {
           />
         </Space>
       </Modal>
-      {siteId && ProjectSettingsModal && (
+      {settings && ProjectSettingsModal && (
         <ProjectSettingsModal
-          key={siteId}
-          id={siteId}
-          initialTab={siteTab}
-          onTabChange={(tab, replace) =>
-            void navigate(
-              `/websites/${projectType}/${encodeURIComponent(siteId)}/${tab}`,
-              { replace },
-            )
-          }
+          key={`${settings.id}:${settings.tab ?? ''}`}
+          id={settings.id}
+          initialTab={settings.tab}
           manageable={!!env.data?.manageable}
-          onClose={() =>
-            void navigate(`/websites/${projectType}`, { replace: true })
-          }
+          onClose={() => {
+            setSettings(undefined);
+            if (siteId) {
+              void navigate(
+                {
+                  pathname: `/websites/${projectType}`,
+                  search: location.search,
+                },
+                { replace: true },
+              );
+            }
+          }}
           onChanged={refresh}
         />
       )}

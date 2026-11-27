@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import ResourceActions, {
+  useResourceActions,
+} from '../../plugins/ResourceActions';
 import { useNavigate } from 'react-router-dom';
 import {
   Alert,
@@ -49,6 +52,7 @@ import { useAuth } from '../../stores/auth';
 import ContentSizedTable from '../../components/ContentSizedTable';
 import LocalBackupsModal from '../../components/LocalBackupsModal';
 import FilePicker from '../file/FilePicker';
+import { useDatabaseBatchActions } from './useDatabaseBatchActions';
 
 function parentDir(filePath: string): string {
   const idx = filePath.lastIndexOf('/');
@@ -585,6 +589,7 @@ function SQLiteExplorerModal({
 }
 
 export default function SqlitePage() {
+  const pluginActions = useResourceActions('databases');
   const navigate = useNavigate();
   const { message, modal } = App.useApp();
   const client = useQueryClient();
@@ -628,6 +633,20 @@ export default function SqlitePage() {
       row.name.toLowerCase().includes(q) || row.path.toLowerCase().includes(q)
     );
   });
+  const batch = useDatabaseBatchActions({
+    rows: filteredFiles,
+    rowKey: (row) => row.id,
+    describe: (row) => `${row.name}（${row.path}）`,
+    deleteNotice: '从面板列表移除记录，保留服务器上的数据库文件和已有备份。',
+    operate: (row, action) =>
+      action === 'backup'
+        ? sqliteCreateBackup(row.id, true)
+        : sqliteRemoveFile(row.id, true),
+    onChanged: () => {
+      void listQuery.refetch();
+      void client.invalidateQueries({ queryKey: ['sqlite-backups'] });
+    },
+  });
 
   return (
     <div style={{ position: 'relative', minHeight: 500 }}>
@@ -642,7 +661,10 @@ export default function SqlitePage() {
             <Input.Search
               allowClear
               placeholder="请输入数据库名或路径"
-              onSearch={setKeyword}
+              onSearch={(value) => {
+                setKeyword(value);
+                batch.reset();
+              }}
               style={{ width: LAYOUT.appSearchWidth, maxWidth: '100%' }}
             />
             <Tooltip title="刷新">
@@ -674,6 +696,9 @@ export default function SqlitePage() {
             fillColumn="path"
             loading={listQuery.isFetching}
             dataSource={filteredFiles}
+            rowSelection={batch.rowSelection}
+            pagination={batch.pagination}
+            footer={batch.footer}
             locale={{
               emptyText: (
                 <Empty
@@ -686,6 +711,7 @@ export default function SqlitePage() {
               {
                 title: '名称',
                 dataIndex: 'name',
+                minWidth: 164,
                 width: 180,
                 render: (v: string) => (
                   <Space>
@@ -697,6 +723,7 @@ export default function SqlitePage() {
               {
                 title: '路径',
                 dataIndex: 'path',
+                minWidth: 240,
                 ellipsis: true,
                 render: (v: string) => (
                   <Tooltip title={v}>
@@ -715,6 +742,7 @@ export default function SqlitePage() {
               {
                 title: '备份',
                 dataIndex: 'backupCount',
+                minWidth: 105,
                 width: 120,
                 render: (v: number | undefined, row) => (
                   <Button
@@ -728,6 +756,7 @@ export default function SqlitePage() {
               },
               {
                 title: '状态',
+                minWidth: 90,
                 width: 90,
                 render: (_, row) => (
                   <Badge
@@ -739,11 +768,13 @@ export default function SqlitePage() {
               {
                 title: '大小',
                 dataIndex: 'size',
+                minWidth: 100,
                 width: 105,
                 render: (v: number, row) => (row.exists ? formatSize(v) : '—'),
               },
               {
                 title: '操作',
+                minWidth: 120,
                 width: 130,
                 render: (_, row) => (
                   <Space>
@@ -774,6 +805,9 @@ export default function SqlitePage() {
                     >
                       移除
                     </Button>
+                    <ResourceActions
+                      items={pluginActions(row.id, row.name, 'sqlite')}
+                    />
                   </Space>
                 ),
               },

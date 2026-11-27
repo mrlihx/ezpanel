@@ -31,7 +31,12 @@ export type FileAction =
   | 'delete'
   | 'locate';
 export const isArchive = (entry: FileEntry) =>
-  !(entry.isDir || entry.linkIsDir) && /\.(zip|tar\.gz)$/i.test(entry.name);
+  !(entry.isDir || entry.linkIsDir) &&
+  /\.(zip|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz|tar\.zst|tzst|tar|7z|rar|gz|bz2|xz|zst)$/i.test(
+    entry.name,
+  );
+
+export type FilePluginAction = { id: string; title: string; multiple: boolean };
 
 type Props = {
   entries: FileEntry[];
@@ -49,6 +54,8 @@ type Props = {
   onPage: (page: number, size: number) => void;
   onSort: (field: string, order: string) => void;
   onAction: (action: FileAction, entries: FileEntry[]) => void;
+  pluginActions: FilePluginAction[];
+  onPlugin: (id: string, entries: FileEntry[]) => void;
   onPaste: () => void;
   onUpload: () => void;
   onTerminal: () => void;
@@ -67,40 +74,56 @@ export default function FileList(props: Props) {
   function menu(rows: FileEntry[]): MenuProps {
     const single = rows.length === 1;
     const entry = rows[0];
+    const items: MenuProps['items'] = single
+      ? [
+          {
+            key: 'open',
+            label:
+              entry.isDir || entry.linkIsDir || isArchive(entry)
+                ? '打开'
+                : canPreviewFile(entry)
+                  ? '预览'
+                  : '编辑',
+          },
+          ...(props.search ? [{ key: 'locate', label: '打开所在目录' }] : []),
+          { type: 'divider' },
+          { key: 'download', label: '下载' },
+          { key: 'copy', label: '复制' },
+          { key: 'move', label: '剪切' },
+          { key: 'rename', label: '重命名' },
+          { key: 'delete', label: '删除', danger: true },
+          { type: 'divider' },
+          { key: 'compress', label: '创建压缩' },
+          ...(isArchive(entry) ? [{ key: 'extract', label: '解压' }] : []),
+          { type: 'divider' },
+          { key: 'properties', label: '属性' },
+        ]
+      : [
+          { key: 'copy', label: '复制' },
+          { key: 'move', label: '剪切' },
+          { key: 'delete', label: '删除', danger: true },
+          { type: 'divider' },
+          { key: 'compress', label: '创建压缩' },
+          { key: 'permissions', label: '权限' },
+        ];
+    const pluginActions = props.pluginActions.filter(
+      (action) => single || action.multiple,
+    );
+    if (pluginActions.length) {
+      items.push(
+        { type: 'divider' },
+        ...pluginActions.map((action) => ({
+          key: `plugin:${action.id}`,
+          label: action.title,
+        })),
+      );
+    }
     return {
-      items: single
-        ? [
-            {
-              key: 'open',
-              label:
-                entry.isDir || entry.linkIsDir || isArchive(entry)
-                  ? '打开'
-                  : canPreviewFile(entry)
-                    ? '预览'
-                    : '编辑',
-            },
-            ...(props.search ? [{ key: 'locate', label: '打开所在目录' }] : []),
-            { type: 'divider' },
-            { key: 'download', label: '下载' },
-            { key: 'copy', label: '复制' },
-            { key: 'move', label: '剪切' },
-            { key: 'rename', label: '重命名' },
-            { key: 'delete', label: '删除', danger: true },
-            { type: 'divider' },
-            { key: 'compress', label: '创建压缩' },
-            ...(isArchive(entry) ? [{ key: 'extract', label: '解压' }] : []),
-            { type: 'divider' },
-            { key: 'properties', label: '属性' },
-          ]
-        : [
-            { key: 'copy', label: '复制' },
-            { key: 'move', label: '剪切' },
-            { key: 'delete', label: '删除', danger: true },
-            { type: 'divider' },
-            { key: 'compress', label: '创建压缩' },
-            { key: 'permissions', label: '权限' },
-          ],
-      onClick: ({ key }) => onAction(key as FileAction, rows),
+      items,
+      onClick: ({ key }) => {
+        if (key.startsWith('plugin:')) props.onPlugin(key.slice(7), rows);
+        else onAction(key as FileAction, rows);
+      },
     };
   }
   const contextEntries = contextRow
@@ -401,6 +424,7 @@ export default function FileList(props: Props) {
             {
               title: '操作',
               key: 'actions',
+              className: 'file-row-actions',
               fixed: desktop ? 'right' : undefined,
               width: LAYOUT.fileActionsWidth,
               align: 'right',

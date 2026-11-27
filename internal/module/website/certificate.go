@@ -14,6 +14,28 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// BindStoredCertificate 只绑定证书夹中覆盖站点全部域名的证书，调用方持有网站任务锁。
+func (m *Module) BindStoredCertificate(ctx context.Context, siteID, certificateID string, forceHTTPS bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var row store.Website
+	if err := m.db.WithContext(ctx).Take(&row, "id = ?", siteID).Error; err != nil {
+		return err
+	}
+	cert, key, err := certificates.ReadPEM(m.db, m.cfg, certificateID)
+	if err != nil {
+		return err
+	}
+	if _, err := certificate(cert, key, websiteDomains(row)); err != nil {
+		return err
+	}
+	row.CertificateID, row.SSLEnabled, row.ForceHTTPS, row.SSLAllowMismatch = certificateID, true, forceHTTPS, false
+	if err := m.validateSites(row); err != nil {
+		return err
+	}
+	return m.change(ctx, row, false, &cert, &key, func() error { return m.db.Save(&row).Error })
+}
+
 func (m *Module) checkSSL(c *gin.Context) {
 	var in struct {
 		CertificateID string `json:"certificateId"`

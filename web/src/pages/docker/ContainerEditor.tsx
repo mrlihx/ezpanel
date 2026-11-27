@@ -236,7 +236,9 @@ export default function ContainerEditor({
                     此容器的挂载来自 VolumesFrom，请在原配置中修改。
                   </Typography.Text>
                 ) : (
-                  <ContainerMountFields />
+                  <Form.Item label="存储挂载" className="docker-create-list">
+                    <ContainerMountFields />
+                  </Form.Item>
                 )}
                 <Button onClick={onResource}>调整资源限制</Button>
               </>

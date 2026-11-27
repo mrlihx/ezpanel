@@ -32,15 +32,18 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           version=0.0.0-dev
+          release_tag=
           if [[ $REF_TYPE == tag ]]; then
             [[ $TAG =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-r[1-9][0-9]*)?$ ]]
+            release_tag=$TAG
             version=${TAG#v}
             version=${version%%-r*}
           fi
-          make build VERSION="$version"
+          make build VERSION="$version" RELEASE_TAG="$release_tag"
           make test lint
           bash -n scripts/install.sh
           test "$(dist/ezpanel-linux-amd64 version)" = "$version"
+          if [[ $REF_TYPE == tag ]]; then test "$(dist/ezpanel-linux-amd64 version --tag)" = "$TAG"; fi
           (cd dist && sha256sum --check SHA256SUMS)
       - name: Prepare release assets
         if: github.ref_type == 'tag'

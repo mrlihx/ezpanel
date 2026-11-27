@@ -77,7 +77,7 @@ export default function DockerImagesPanel({
                     构建镜像
                   </Button>
                   <Button disabled={!online} onClick={() => prune('images')}>
-                    清理悬空镜像
+                    清理镜像
                   </Button>
                 </Space>
                 {filter}

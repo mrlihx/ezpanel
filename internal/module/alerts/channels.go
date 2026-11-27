@@ -35,6 +35,7 @@ type channel struct {
 func (channel) TableName() string { return "alert_channels" }
 
 type channelSettings struct {
+	Target     string
 	SMTPHost   string
 	SMTPPort   int
 	SMTPMode   string
@@ -52,6 +53,7 @@ type channelSettings struct {
 }
 
 type channelDTO struct {
+	Target        string   `json:"target,omitempty"`
 	ID            string   `json:"id,omitempty"`
 	Kind          string   `json:"kind"`
 	Name          string   `json:"name"`
@@ -83,11 +85,13 @@ func (item channel) dto(settings channelSettings) channelDTO {
 		dto.SMTPHost, dto.SMTPPort, dto.SMTPMode = settings.SMTPHost, settings.SMTPPort, settings.SMTPMode
 		dto.From, dto.Username, dto.Recipients = settings.From, settings.Username, settings.Recipients
 		dto.HasPassword = settings.Password != ""
-	} else {
+	} else if item.Kind == "webhook" {
 		dto.Method, dto.Format, dto.VerifyTLS = settings.Method, settings.Format, &settings.VerifyTLS
 		dto.HasURL = settings.URL != ""
 		dto.HasParams = settings.Params != nil
 		dto.HasHeaders = len(settings.Headers) > 0
+	} else {
+		dto.Target = settings.Target
 	}
 	return dto
 }
@@ -289,6 +293,10 @@ func (m *Module) saveChannel(c *gin.Context) {
 	}
 
 	id := c.Param("id")
+	if provider, ok := strings.CutPrefix(in.Kind, "plugin:"); ok && id == "" && (m.providers == nil || !m.providers.NotificationProviderReady(provider)) {
+		response.Fail(c, response.Invalid, "通知渠道插件未运行")
+		return
+	}
 	var item channel
 	var settings channelSettings
 	var inputErr error
@@ -310,7 +318,15 @@ func (m *Module) saveChannel(c *gin.Context) {
 			}
 		}
 
-		settings, inputErr = in.settings(item.Kind, settings)
+		if strings.HasPrefix(item.Kind, "plugin:") {
+			target := strings.TrimSpace(in.Target)
+			if len(target) > 256 || strings.IndexFunc(target, unicode.IsControl) >= 0 {
+				inputErr = errors.New("通知目标无效")
+			}
+			settings = channelSettings{Target: target}
+		} else {
+			settings, inputErr = in.settings(item.Kind, settings)
+		}
 		if inputErr != nil {
 			return inputErr
 		}

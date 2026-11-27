@@ -30,7 +30,11 @@ func (m *Manager) pythonProjectMount(id, environment string) (string, error) {
 }
 
 func (m *Manager) ProjectUsesPythonEnvironment(ctx context.Context, id string) (bool, error) {
-	info, _, err := m.inspectContainer(ctx, "ezpanel-site-"+id)
+	name, err := m.projectContainerName(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	info, _, err := m.inspectContainer(ctx, name)
 	return info.Config.Labels["ezpanel.python-venv"] == "true", err
 }
 

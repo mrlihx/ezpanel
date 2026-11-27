@@ -301,7 +301,10 @@ func (m *Module) backupHandler(c *gin.Context) {
 	var p struct {
 		Database string `json:"database"`
 	}
-	if c.ShouldBindJSON(&p) != nil || !identifier.MatchString(p.Database) {
+	if !response.Bind(c, &p) {
+		return
+	}
+	if !identifier.MatchString(p.Database) {
 		response.Fail(c, response.Invalid, "数据库名称无效")
 		return
 	}
@@ -431,7 +434,10 @@ func (m *Module) restoreHandler(c *gin.Context) {
 	var p struct {
 		ConfirmDatabase string `json:"confirmDatabase"`
 	}
-	if c.ShouldBindJSON(&p) != nil || p.ConfirmDatabase != b.Database {
+	if !response.Bind(c, &p) {
+		return
+	}
+	if p.ConfirmDatabase != b.Database {
 		response.Fail(c, response.Invalid, "须精确确认目标数据库名称")
 		return
 	}
@@ -463,6 +469,25 @@ func (m *Module) restoreHandler(c *gin.Context) {
 	c.Set("panel.taskSubmitted", true)
 	response.OK(c, gin.H{"taskId": id})
 }
+func (m *Module) RestorePluginBackup(ctx context.Context, serverID, id, confirm string, log *task.Log) error {
+	var row store.DBBackup
+	db := m.db.WithContext(ctx)
+	if err := db.First(&row, "id = ? AND server_id = ? AND storage_type = ?", id, serverID, "local").Error; err != nil {
+		return errors.New("本地备份不存在或不属于此数据库实例")
+	}
+	if row.Database != confirm {
+		return errors.New("须精确确认目标数据库名称")
+	}
+	var references int64
+	if err := db.Model(&store.DatabaseTrash{}).Where("backup_id = ?", id).Count(&references).Error; err != nil {
+		return err
+	}
+	if references > 0 {
+		return errors.New("请从数据库回收站执行恢复，避免覆盖同名新库")
+	}
+	return m.restore(ctx, id, nil, log)
+}
+
 func (m *Module) restore(ctx context.Context, id string, trash *store.DatabaseTrash, log *task.Log) error {
 	var b store.DBBackup
 	if e := m.db.First(&b, "id = ?", id).Error; e != nil {

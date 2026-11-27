@@ -364,7 +364,10 @@ type userInput struct {
 
 func readAccount(c *gin.Context) (userInput, bool) {
 	var p userInput
-	if c.ShouldBindJSON(&p) != nil || !account(p.Username, p.Host) || protectedUser(p.Username) || len(p.Password) > 1024 || strings.ContainsRune(p.Password, 0) {
+	if !response.Bind(c, &p) {
+		return p, false
+	}
+	if !account(p.Username, p.Host) || protectedUser(p.Username) || len(p.Password) > 1024 || strings.ContainsRune(p.Password, 0) {
 		response.Fail(c, response.Invalid, "账号或主机无效，内置账号禁止修改")
 		return p, false
 	}

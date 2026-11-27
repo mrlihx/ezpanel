@@ -3,12 +3,39 @@ package database
 import (
 	"archive/tar"
 	"archive/zip"
+	"compress/bzip2"
 	"compress/gzip"
 	"context"
 	"errors"
+	"github.com/klauspost/compress/zstd"
 	"io"
 	"strings"
 )
+
+type zstdImportReadCloser struct {
+	dec *zstd.Decoder
+	err error
+}
+
+func newZstdImportReadCloser(r io.Reader) io.ReadCloser {
+	dec, err := zstd.NewReader(r)
+	return &zstdImportReadCloser{dec: dec, err: err}
+}
+
+func (z *zstdImportReadCloser) Read(p []byte) (int, error) {
+	if z.err != nil {
+		return 0, z.err
+	}
+	return z.dec.Read(p)
+}
+
+func (z *zstdImportReadCloser) Close() error {
+	if z.dec != nil {
+		z.dec.Close()
+		z.dec = nil
+	}
+	return nil
+}
 
 var errImportTooLarge = errors.New("文件超过导入大小上限")
 
@@ -43,6 +70,10 @@ func readImportSQL(ctx context.Context, dst io.Writer, src io.ReaderAt, size int
 		if err != nil {
 			return err
 		}
+		archive.RegisterDecompressor(12, func(r io.Reader) io.ReadCloser {
+			return io.NopCloser(bzip2.NewReader(r))
+		})
+		archive.RegisterDecompressor(93, newZstdImportReadCloser)
 		if len(archive.File) > entryLimit {
 			return errors.New("归档条目超过上限")
 		}

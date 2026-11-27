@@ -9,11 +9,50 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 )
+
+func validateEnvField(v Env) error {
+	switch v.Type {
+	case "", "text", "password", "number", "boolean", "file", "directory":
+	case "select":
+		if len(v.Options) == 0 || len(v.Options) > 50 {
+			return errors.New("下拉字段需要 1 至 50 个选项：" + v.Key)
+		}
+	default:
+		return errors.New("未知配置字段类型：" + v.Key)
+	}
+	if len(v.Help) > 512 || v.Secret && v.Type != "" && v.Type != "text" && v.Type != "password" {
+		return errors.New("配置字段说明或秘密类型无效：" + v.Key)
+	}
+	return validateEnvValue(v, v.Default)
+}
+
+func validateEnvValue(v Env, value string) error {
+	if value == "" {
+		return nil
+	}
+	valid := true
+	switch v.Type {
+	case "number":
+		_, err := strconv.ParseInt(value, 10, 64)
+		valid = err == nil
+	case "boolean":
+		valid = value == "true" || value == "false"
+	case "select":
+		valid = slices.Contains(v.Options, value)
+	case "file", "directory":
+		valid = filepath.IsAbs(value) && filepath.Clean(value) == value
+	}
+	if !valid {
+		return errors.New("配置字段值不符合类型要求：" + v.Key)
+	}
+	return nil
+}
 
 func (m *Module) candidate(mf Manifest, old map[string]string, values map[string]string, required bool) (map[string]string, error) {
 	out := map[string]string{}
@@ -37,6 +76,12 @@ func (m *Module) candidate(mf Manifest, old map[string]string, values map[string
 		v, ok := allowed[key]
 		if !ok || len(value) > 8192 || strings.ContainsRune(value, 0) || !utf8.ValidString(value) {
 			return nil, errors.New("未知配置键或值无效")
+		}
+		if err := validateEnvValue(v, value); err != nil {
+			return nil, err
+		}
+		if key == webhookSecretKey && value != "" && len(value) < 32 && slices.Contains(mf.Permissions, "jobs.webhook") {
+			return nil, errors.New("Webhook 密钥至少需要 32 字节")
 		}
 		if v.Secret && value != "" {
 			var e error
@@ -63,16 +108,20 @@ func (m *Module) configure(c *gin.Context) {
 	if !response.Bind(c, &in) {
 		return
 	}
-	p, ok := m.row(c)
-	if !ok {
-		return
-	}
-	release, e := m.tasks.Acquire("plugin:" + p.ID)
+	release, e := m.tasks.Acquire("plugin:" + c.Param("id"))
 	if e != nil {
 		response.Fail(c, response.Conflict, "插件忙")
 		return
 	}
 	defer release()
+	p, ok := m.row(c)
+	if !ok {
+		return
+	}
+	if p.Operation != nil {
+		response.Fail(c, response.Conflict, "插件存在未恢复的操作记录")
+		return
+	}
 	var mf Manifest
 	var old map[string]string
 	if json.Unmarshal([]byte(p.Manifest), &mf) != nil || json.Unmarshal([]byte(p.Config), &old) != nil {
@@ -86,6 +135,10 @@ func (m *Module) configure(c *gin.Context) {
 	}
 	cfg, _ := json.Marshal(next)
 	before := p.Config
+	if string(cfg) == before {
+		response.OK(c, gin.H{"runtimeStatus": m.status(p)})
+		return
+	}
 	running := p.Enabled
 	if running {
 		m.stop(p.ID)
@@ -125,7 +178,7 @@ func (m *Module) logs(c *gin.Context) {
 			return
 		}
 	}
-	path := filepath.Join(m.private(), p.ID, "logs/plugin.log")
+	path := m.logPath(p.ID)
 	f, e := os.Open(path)
 	if os.IsNotExist(e) {
 		response.OK(c, gin.H{"content": "", "truncated": false})
@@ -151,10 +204,15 @@ func (m *Module) logs(c *gin.Context) {
 		response.Fail(c, 5000, "")
 		return
 	}
-	parts := strings.Split(string(b), "\n")
+	content := string(b)
+	parts := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
 	truncated := offset > 0 || len(parts) > lines
 	if len(parts) > lines {
-		parts = parts[len(parts)-lines:]
+		tail := strings.Join(parts[len(parts)-lines:], "\n")
+		if strings.HasSuffix(content, "\n") {
+			tail += "\n"
+		}
+		content = tail
 	}
 	secrets := []string{m.cfg.JWTSecret, m.cfg.AESKey, m.cfg.Entry}
 	var mf Manifest
@@ -178,5 +236,5 @@ func (m *Module) logs(c *gin.Context) {
 		secrets = append(secrets, r.token, r.proxy)
 	}
 	m.mu.Unlock()
-	response.OK(c, gin.H{"content": redact(strings.Join(parts, "\n"), secrets), "truncated": truncated})
+	response.OK(c, gin.H{"content": redact(content, secrets), "truncated": truncated})
 }

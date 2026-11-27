@@ -57,9 +57,10 @@ export const sqliteFiles = (signal?: AbortSignal) =>
 export const sqliteAddFile = (data: { name?: string; path: string }) =>
   request<SQLiteFile>('/api/db/sqlite/files', { method: 'POST', data });
 
-export const sqliteRemoveFile = (id: string) =>
+export const sqliteRemoveFile = (id: string, silentError = false) =>
   request(`/api/db/sqlite/files/${encodeURIComponent(id)}`, {
     method: 'DELETE',
+    silentError,
   });
 
 export const sqliteTables = (id: string, signal?: AbortSignal) =>
@@ -119,10 +120,10 @@ export const sqliteBackups = (id: string, signal?: AbortSignal) =>
     { signal },
   );
 
-export const sqliteCreateBackup = (id: string) =>
+export const sqliteCreateBackup = (id: string, silentError = false) =>
   request<SQLiteBackup>(
     `/api/db/sqlite/files/${encodeURIComponent(id)}/backups`,
-    { method: 'POST' },
+    { method: 'POST', silentError },
   );
 
 export const sqliteDeleteBackup = (id: string, filename: string) =>

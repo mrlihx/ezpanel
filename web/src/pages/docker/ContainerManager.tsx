@@ -24,8 +24,13 @@ import ContentSizedTable from '../../components/ContentSizedTable';
 import ApplicationSettingsForm from '../../components/ApplicationSettingsForm';
 import { containerOwnership } from './containerOwnership';
 import { request } from '../../api/client';
-import { inspectContainer, networks, registries } from '../../api/docker';
-import { saveWebsite } from '../../api/website';
+import {
+  inspectContainer,
+  networks,
+  registries,
+  type ContainerInspection,
+} from '../../api/docker';
+import { saveWebsite, website } from '../../api/website';
 import { LAYOUT } from '../../styles/tokens';
 import { formatTime } from '../../utils/format';
 import ContainerEditor from './ContainerEditor';
@@ -55,12 +60,33 @@ function validTime(value?: string) {
   return value && !value.startsWith('0001-') ? formatTime(value) : '—';
 }
 
+function ContainerJSON({
+  id,
+  item,
+}: {
+  id: string;
+  item: ContainerInspection;
+}) {
+  return (
+    <div className="docker-container-code">
+      <Suspense fallback={<Skeleton active />}>
+        <CodeEditor
+          path={`container-${id}.json`}
+          editorTheme="vs-dark"
+          readOnly
+          value={JSON.stringify(item, null, 2)}
+          options={{ wordWrap: 'on' }}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
 export default function ContainerManager({
   id,
   name,
   initialTab,
   onTabChange,
-  inline = false,
   onClose,
   onNavigate,
   onChanged,
@@ -72,7 +98,6 @@ export default function ContainerManager({
   name: string;
   initialTab: string;
   onTabChange?: (tab: string) => void;
-  inline?: boolean;
   onClose?: () => void;
   onNavigate?: () => void;
   onChanged: (name?: string) => void;
@@ -83,15 +108,32 @@ export default function ContainerManager({
   const { modal, message } = App.useApp();
   const client = useQueryClient();
   const screens = Grid.useBreakpoint();
-  const [localTab, setLocalTab] = useState(initialTab);
-  const tab = onTabChange ? initialTab : localTab;
-  const setTab = onTabChange ?? setLocalTab;
+  const [localTab, setTab] = useState(initialTab);
+  const requestedTab = onTabChange ? initialTab : localTab;
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const detail = useQuery({
     queryKey: ['docker-container-detail', id],
     queryFn: ({ signal }) => inspectContainer(id, signal),
-    refetchInterval: tab === 'status' || tab === 'stats' ? 5000 : false,
+    refetchInterval:
+      requestedTab === 'status' || requestedTab === 'stats' ? 5000 : false,
+  });
+  const item = detail.data;
+  const currentName = item?.Name.replace(/^\//, '') || name;
+  const owner = containerOwnership(item?.Config.Labels, currentName);
+  const replaceable =
+    !owner && !item?.HostConfig.AutoRemove && !item?.State.Paused;
+  const tab =
+    ((requestedTab === 'edit' || requestedTab === 'upgrade') && !replaceable) ||
+    (requestedTab === 'rename' && owner)
+      ? 'status'
+      : requestedTab;
+  const siteId = owner?.siteId ?? '';
+  const site = useQuery({
+    queryKey: ['website', siteId],
+    queryFn: () => website(siteId),
+    enabled: Boolean(siteId) && tab === 'status',
+    retry: false,
   });
   const [networkForm] = Form.useForm();
   const [proxyForm] = Form.useForm();
@@ -105,11 +147,6 @@ export default function ContainerManager({
     queryFn: registries,
     enabled: tab === 'commit' || tab === 'upgrade',
   });
-  const item = detail.data;
-  const currentName = item?.Name.replace(/^\//, '') || name;
-  const owner = containerOwnership(item?.Config.Labels, currentName);
-  const replaceable =
-    !owner && !item?.HostConfig.AutoRemove && !item?.State.Paused;
   const running =
     item?.State.Running &&
     !item.State.Paused &&
@@ -179,24 +216,6 @@ export default function ContainerManager({
       content: '运行中的容器会短暂中断。旧容器将保留为停止状态，数据卷会保留。',
       onOk: () => enqueue('recreate', data),
     });
-  const unavailable = (
-    <Alert
-      type="info"
-      showIcon
-      message={
-        owner
-          ? `此容器由${owner.label}管理，请到归属入口修改配置。`
-          : '请恢复暂停中的容器，或关闭自动删除模式后再操作。'
-      }
-      action={
-        owner?.link && (
-          <Link to={owner.link} onClick={onNavigate}>
-            {owner.action}
-          </Link>
-        )
-      }
-    />
-  );
   const host = item?.HostConfig;
   const resourceValues = {
     memoryMB: host?.Memory ? Math.ceil(host.Memory / 1048576) : undefined,
@@ -241,14 +260,10 @@ export default function ContainerManager({
         <Skeleton active />
       ) : (
         <Tabs
-          className={
-            inline
-              ? 'docker-container-tabs docker-container-inline'
-              : 'docker-container-tabs'
-          }
-          tabPosition={!inline && screens.md ? 'left' : 'top'}
+          className="docker-container-tabs"
+          tabPosition={screens.md ? 'left' : 'top'}
           activeKey={tab}
-          onChange={setTab}
+          onChange={onTabChange ?? setTab}
           destroyOnHidden
           items={[
             {
@@ -315,7 +330,17 @@ export default function ContainerManager({
                       { label: '容器名称', children: currentName },
                       {
                         label: '配置归属',
-                        children: owner?.label ?? '独立容器',
+                        children: site.data ? (
+                          <Link
+                            to={`/websites/${site.data.projectType}`}
+                            state={{ openWebsiteSettings: site.data.id }}
+                            onClick={onNavigate}
+                          >
+                            {site.data.name}
+                          </Link>
+                        ) : (
+                          (owner?.label ?? '独立容器')
+                        ),
                       },
                       {
                         label: '容器 ID',
@@ -469,19 +494,7 @@ export default function ContainerManager({
                     {
                       key: 'file',
                       label: '原始 JSON',
-                      children: (
-                        <div className="docker-container-code">
-                          <Suspense fallback={<Skeleton active />}>
-                            <CodeEditor
-                              path={`container-${id}.json`}
-                              editorTheme="vs-dark"
-                              readOnly
-                              value={JSON.stringify(item, null, 2)}
-                              options={{ wordWrap: 'on' }}
-                            />
-                          </Suspense>
-                        </div>
-                      ),
+                      children: <ContainerJSON id={id} item={item} />,
                     },
                   ]}
                 />
@@ -841,97 +854,99 @@ export default function ContainerManager({
                 </Form>
               ),
             },
-            {
-              key: 'edit',
-              label: '编辑容器',
-              children: replaceable ? (
-                <ContainerEditor
-                  container={item}
-                  busy={busy}
-                  onResource={() => setTab('restart')}
-                  onSubmit={recreate}
-                />
-              ) : (
-                unavailable
-              ),
-            },
-            {
-              key: 'upgrade',
-              label: '升级容器',
-              children: replaceable ? (
-                <Form
-                  layout="vertical"
-                  className="docker-container-form"
-                  initialValues={{ image: initialImage, pull: true }}
-                  onFinish={(values) =>
-                    recreate({ ...values, upgrade: true }, true)
-                  }
-                >
-                  <Form.Item label="当前镜像">
-                    <Typography.Text>{initialImage}</Typography.Text>
-                  </Form.Item>
-                  <Form.Item
-                    name="image"
-                    label="目标镜像"
-                    rules={[{ required: true, whitespace: true }]}
-                  >
-                    <Input placeholder="镜像名称:标签" />
-                  </Form.Item>
-                  <Form.Item name="registryId" label="仓库凭据">
-                    <Select
-                      allowClear
-                      placeholder="无需认证"
-                      options={registryOptions}
-                    />
-                  </Form.Item>
-                  <Form.Item name="pull" valuePropName="checked">
-                    <Checkbox>拉取目标镜像</Checkbox>
-                  </Form.Item>
-                  <Form.Item name="force" valuePropName="checked">
-                    <Checkbox>镜像相同时仍重建容器</Checkbox>
-                  </Form.Item>
-                  <Button type="primary" htmlType="submit" loading={busy}>
-                    升级容器
-                  </Button>
-                </Form>
-              ) : (
-                unavailable
-              ),
-            },
-            {
-              key: 'rename',
-              label: '重命名',
-              children: owner ? (
-                unavailable
-              ) : (
-                <Form
-                  key={currentName}
-                  layout="vertical"
-                  className="docker-container-form"
-                  initialValues={{ name: currentName }}
-                  onFinish={({ name }) =>
-                    void change(async () => {
-                      await request(`${path}/action`, {
-                        method: 'POST',
-                        data: { action: 'rename', name: name.trim() },
-                      });
-                      onChanged(name.trim());
-                    }, '容器已重命名').catch(() => {})
-                  }
-                >
-                  <Form.Item
-                    name="name"
-                    label="容器名称"
-                    rules={[{ required: true, whitespace: true }]}
-                  >
-                    <Input />
-                  </Form.Item>
-                  <Button type="primary" htmlType="submit" loading={busy}>
-                    保存名称
-                  </Button>
-                </Form>
-              ),
-            },
+            ...(replaceable
+              ? [
+                  {
+                    key: 'edit',
+                    label: '编辑容器',
+                    children: (
+                      <ContainerEditor
+                        container={item}
+                        busy={busy}
+                        onResource={() => setTab('restart')}
+                        onSubmit={recreate}
+                      />
+                    ),
+                  },
+                  {
+                    key: 'upgrade',
+                    label: '升级容器',
+                    children: (
+                      <Form
+                        layout="vertical"
+                        className="docker-container-form"
+                        initialValues={{ image: initialImage, pull: true }}
+                        onFinish={(values) =>
+                          recreate({ ...values, upgrade: true }, true)
+                        }
+                      >
+                        <Form.Item label="当前镜像">
+                          <Typography.Text>{initialImage}</Typography.Text>
+                        </Form.Item>
+                        <Form.Item
+                          name="image"
+                          label="目标镜像"
+                          rules={[{ required: true, whitespace: true }]}
+                        >
+                          <Input placeholder="镜像名称:标签" />
+                        </Form.Item>
+                        <Form.Item name="registryId" label="仓库凭据">
+                          <Select
+                            allowClear
+                            placeholder="无需认证"
+                            options={registryOptions}
+                          />
+                        </Form.Item>
+                        <Form.Item name="pull" valuePropName="checked">
+                          <Checkbox>拉取目标镜像</Checkbox>
+                        </Form.Item>
+                        <Form.Item name="force" valuePropName="checked">
+                          <Checkbox>镜像相同时仍重建容器</Checkbox>
+                        </Form.Item>
+                        <Button type="primary" htmlType="submit" loading={busy}>
+                          升级容器
+                        </Button>
+                      </Form>
+                    ),
+                  },
+                ]
+              : []),
+            ...(!owner
+              ? [
+                  {
+                    key: 'rename',
+                    label: '重命名',
+                    children: (
+                      <Form
+                        key={currentName}
+                        layout="vertical"
+                        className="docker-container-form"
+                        initialValues={{ name: currentName }}
+                        onFinish={({ name }) =>
+                          void change(async () => {
+                            await request(`${path}/action`, {
+                              method: 'POST',
+                              data: { action: 'rename', name: name.trim() },
+                            });
+                            onChanged(name.trim());
+                          }, '容器已重命名').catch(() => {})
+                        }
+                      >
+                        <Form.Item
+                          name="name"
+                          label="容器名称"
+                          rules={[{ required: true, whitespace: true }]}
+                        >
+                          <Input />
+                        </Form.Item>
+                        <Button type="primary" htmlType="submit" loading={busy}>
+                          保存名称
+                        </Button>
+                      </Form>
+                    ),
+                  },
+                ]
+              : []),
             {
               key: 'stats',
               label: '实时监控',
@@ -1036,7 +1051,6 @@ export default function ContainerManager({
       )}
     </>
   );
-  if (inline) return content;
   return (
     <Modal
       open

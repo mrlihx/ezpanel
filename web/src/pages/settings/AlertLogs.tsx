@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Alert, Button, Flex, Input, Segmented, Tag } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import {
-  alertChannelNames,
+  alertChannelName,
   alertLogs,
   alertRules,
   type AlertLog,
@@ -103,7 +103,7 @@ export default function AlertLogs({
             title: '告警渠道',
             dataIndex: 'channelName',
             render: (_, row) =>
-              `${row.channelName}（${alertChannelNames[row.kind]}）`,
+              `${row.channelName}（${alertChannelName(row.kind)}）`,
           },
           {
             title: '发送结果',

@@ -31,6 +31,7 @@ import {
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RotateCw, Settings, Trash2 } from 'lucide-react';
 import ContentSizedTable from '../../components/ContentSizedTable';
+import ApplicationInstallGuide from '../../components/ApplicationInstallGuide';
 import { useRoutedTab } from '../../hooks/useRoutedTab';
 import RouteNotFound from '../../router/RouteNotFound';
 import SectionTabs from '../../components/SectionTabs';
@@ -39,9 +40,11 @@ import RootPasswordModal from './RootPasswordModal';
 import BackupsModal from '../../components/BackupsModal';
 import RemoteDatabases from './RemoteDatabases';
 import DeleteDatabaseModal from './DeleteDatabaseModal';
-import EnvironmentOverlay from './EnvironmentOverlay';
 import TrashModal from '../file/TrashModal';
 import { request } from '../../api/client';
+import ResourceActions, {
+  useResourceActions,
+} from '../../plugins/ResourceActions';
 import {
   databaseList,
   environment,
@@ -69,6 +72,8 @@ import PhpMyAdminButton from './PhpMyAdminButton';
 import DatabaseBatchModal, {
   type DatabaseBatchAction,
 } from './DatabaseBatchModal';
+import DatabaseSelectAll from './DatabaseSelectAll';
+import DatabaseInstancesStatus from './DatabaseInstancesStatus';
 type Operation = { kind: 'database' | 'user' | 'password'; user?: DBUser };
 export default function DatabasePage() {
   const { engine: requested, section } = useParams();
@@ -113,6 +118,7 @@ export default function DatabasePage() {
 }
 
 function MySQLPage() {
+  const pluginActions = useResourceActions('databases');
   const fixedActions = Grid.useBreakpoint().lg ? 'right' : undefined;
   const { message, modal } = App.useApp();
   const [keyword, setKeyword] = useState('');
@@ -120,7 +126,12 @@ function MySQLPage() {
   const [batchAction, setBatchAction] = useState<
     DatabaseBatchAction | 'backup'
   >('access');
-  const [batchModal, setBatchModal] = useState<DatabaseBatchAction>();
+  const [batchModal, setBatchModal] = useState<{
+    action: DatabaseBatchAction;
+    serverId: string;
+    databases: Database[];
+    recyclable: boolean;
+  }>();
   const [serverForm, setServerForm] = useState<{
     server?: Server;
   }>();
@@ -132,7 +143,6 @@ function MySQLPage() {
     name: string;
     serverId: string;
   }>();
-  const [backupServerId, setBackupServerId] = useState<string>();
   const [databaseSettings, setDatabaseSettings] = useState<{
     kind: 'access' | 'password';
     database: Database & { _serverId?: string };
@@ -160,10 +170,12 @@ function MySQLPage() {
   const tab = section ?? 'databases';
   const backupFilter =
     tab === 'backups' ? (params.get('database') ?? undefined) : undefined;
-  function setTab(next: string, database?: string) {
+  function setTab(next: string, database?: string, serverId?: string) {
     const query = new URLSearchParams(location.search);
     if (database) query.set('database', database);
     else query.delete('database');
+    if (serverId) query.set('serverId', serverId);
+    else query.delete('serverId');
     const search = query.toString();
     const pathname =
       next === 'databases' ? '/databases/mysql' : `/databases/mysql/${next}`;
@@ -210,6 +222,13 @@ function MySQLPage() {
       ? 'default'
       : undefined);
   const id = selected?.id;
+  const backupServerId = params.get('serverId') ?? id;
+  const backupServer = list.data?.find(
+    (server) => server.id === backupServerId,
+  );
+  const canCreateBackup =
+    !!backupServer &&
+    (!!backupServer.containerClient || !!env.data?.backupClientInstalled);
   const targetServers = allMode
     ? (list.data ?? []).filter((s) => s.running !== false)
     : selected && selected.running !== false
@@ -250,9 +269,6 @@ function MySQLPage() {
     setPage(1);
     setSelectedDBs([]);
   }
-  const containerClient = selected?.containerClient ?? false;
-  const canBackup = containerClient || !!env.data?.backupClientInstalled;
-  const recyclable = containerClient || !!env.data?.clientInstalled;
   const users = useQuery({
     queryKey: ['db-users', id],
     queryFn: () => userList(id!),
@@ -323,22 +339,42 @@ function MySQLPage() {
         !database.system &&
         database.name.toLowerCase().includes(keyword.toLowerCase()),
     ) ?? [];
-  const pageDatabases = filteredDatabases.slice((page - 1) * size, page * size);
-  const selectedDatabases =
-    databases.data?.filter(
-      (database) => !database.system && selectedDBs.includes(database.name),
-    ) ?? [];
-  const pageSelected = pageDatabases.filter((database) =>
-    selectedDBs.includes(database.name),
-  ).length;
+  const currentPage = Math.min(
+    page,
+    Math.max(1, Math.ceil(filteredDatabases.length / size)),
+  );
+  const rowKey = (row: DatabaseRow) => `${row._serverId ?? id}:${row.name}`;
+  const pageDatabases = filteredDatabases.slice(
+    (currentPage - 1) * size,
+    currentPage * size,
+  );
+  const selectedDatabases = filteredDatabases.filter((database) =>
+    selectedDBs.includes(rowKey(database)),
+  );
+  const batchServerId = selectedDatabases[0]?._serverId ?? id;
+  const batchServer = list.data?.find((server) => server.id === batchServerId);
+  const canBackup =
+    !!batchServer?.containerClient || !!env.data?.backupClientInstalled;
   const openBatch = () => {
-    if (!selectedDatabases.length) return;
+    if (!selectedDatabases.length || !batchServerId) return;
     if (selectedDatabases.length > 100) {
       message.error('每批最多操作100个数据库');
       return;
     }
+    if (
+      selectedDatabases.some((database) => database._serverId !== batchServerId)
+    ) {
+      void message.warning('请选中同一 MySQL 实例下的数据库');
+      return;
+    }
     if (batchAction !== 'backup') {
-      setBatchModal(batchAction);
+      setBatchModal({
+        action: batchAction,
+        serverId: batchServerId,
+        databases: selectedDatabases,
+        recyclable:
+          !!batchServer?.containerClient || !!env.data?.clientInstalled,
+      });
       return;
     }
     modal.confirm({
@@ -347,7 +383,7 @@ function MySQLPage() {
       onOk: () =>
         perform(async () => {
           const result = await request<{ taskId: string }>(
-            `/api/db/servers/${id}/backups/batch`,
+            `/api/db/servers/${encodeURIComponent(batchServerId)}/backups/batch`,
             {
               method: 'POST',
               data: {
@@ -360,7 +396,7 @@ function MySQLPage() {
         }),
     });
   };
-  const databaseColumns: TableColumnsType<Database> = [
+  const databaseColumns: TableColumnsType<DatabaseRow> = [
     {
       key: 'name',
       title: '数据库名',
@@ -411,7 +447,7 @@ function MySQLPage() {
       title: '备份',
       width: 160,
       render: (_, row) => {
-        const rowSid = (row as DatabaseRow)._serverId ?? id;
+        const rowSid = row._serverId ?? id;
         const rowSrv =
           list.data?.find((item) => item.id === rowSid) ?? selected;
         return (
@@ -420,10 +456,7 @@ function MySQLPage() {
               type="link"
               style={{ padding: 0 }}
               disabled={row.system}
-              onClick={() => {
-                setBackupServerId(rowSid);
-                setTab('backups', row.name);
-              }}
+              onClick={() => setTab('backups', row.name, rowSid)}
             >
               {row.backupCount > 0 ? `${row.backupCount}份备份` : '无备份'}
             </Button>
@@ -528,6 +561,7 @@ function MySQLPage() {
             >
               删除
             </Button>
+            <ResourceActions items={pluginActions(rowSid, row.name, 'mysql')} />
           </Space>
         );
       },
@@ -537,6 +571,12 @@ function MySQLPage() {
     list.error ??
     env.error ??
     (tab === 'users' ? users.error : databases.error);
+  const needsInstallation =
+    env.isSuccess &&
+    !env.data.localInstalled &&
+    list.isSuccess &&
+    list.data.length === 0;
+  const activeInstallTask = env.data?.activeTaskId;
   return (
     <>
       {queryError && (
@@ -549,293 +589,295 @@ function MySQLPage() {
           action={<Button onClick={refresh}>重试</Button>}
         />
       )}
-      <div style={{ position: 'relative', minHeight: 500 }}>
-        <Card style={{ marginBottom: SPACING.lg }}>
-          <Flex justify="space-between" align="center" gap={SPACING.md} wrap>
-            <Space wrap>
-              <Button
-                type="primary"
-                disabled={!id || selected?.running === false}
-                onClick={() => {
-                  setTab('databases');
-                  openOperation({ kind: 'database' });
-                }}
-              >
-                添加数据库
-              </Button>
-              <Button
-                disabled={
-                  !id ||
-                  selected?.running === false ||
-                  ((!selected?.local || !!dockerInstance) &&
-                    selected?.username !== 'root')
-                }
-                onClick={() => setCredentials(true)}
-              >
-                ROOT密码
-              </Button>
-
-              <Button onClick={() => setRemoteOpen(true)}>远程数据库</Button>
-              <Button
-                icon={<Trash2 size={15} strokeWidth={1.9} />}
-                onClick={() => setTrashOpen(true)}
-              >
-                回收站
-              </Button>
-              {dockerInstance && selected ? (
-                <DatabaseInstanceControl
-                  key={id}
-                  engine="mysql"
-                  instanceId={dockerInstance}
-                  name={selected.name}
-                  version={
-                    selected.version ?? localApplication?.version ?? undefined
+      {needsInstallation ? (
+        <ApplicationInstallGuide
+          name="MySQL"
+          install={
+            activeInstallTask
+              ? () => setTask({ id: activeInstallTask, title: '安装 MySQL' })
+              : 'mysql'
+          }
+          installText={activeInstallTask ? '查看安装进度' : undefined}
+          onDetect={refresh}
+          extra={
+            <Button onClick={() => setRemoteOpen(true)}>添加远程数据库</Button>
+          }
+        />
+      ) : (
+        <div style={{ minHeight: 500 }}>
+          <Card style={{ marginBottom: SPACING.lg }}>
+            <Flex justify="space-between" align="center" gap={SPACING.md} wrap>
+              <Space wrap>
+                <Button
+                  type="primary"
+                  disabled={!id || selected?.running === false}
+                  onClick={() => {
+                    setTab('databases');
+                    openOperation({ kind: 'database' });
+                  }}
+                >
+                  添加数据库
+                </Button>
+                <Button
+                  disabled={
+                    !id ||
+                    selected?.running === false ||
+                    ((!selected?.local || !!dockerInstance) &&
+                      selected?.username !== 'root')
                   }
-                  running={selected.running ?? !!localApplication?.running}
-                  onChanged={refresh}
-                />
-              ) : (
-                (!selected || selected.local) &&
-                env.data?.application && (
-                  <ApplicationServiceControl
-                    app={env.data.application}
+                  onClick={() => setCredentials(true)}
+                >
+                  ROOT密码
+                </Button>
+
+                <Button onClick={() => setRemoteOpen(true)}>远程数据库</Button>
+                <Button
+                  icon={<Trash2 size={15} strokeWidth={1.9} />}
+                  onClick={() => setTrashOpen(true)}
+                >
+                  回收站
+                </Button>
+                {allMode && list.data && list.data.length > 1 ? (
+                  <DatabaseInstancesStatus
+                    engine="mysql"
+                    instances={list.data.map((server) => ({
+                      id: server.id,
+                      name: mysqlLabel(server),
+                      version: server.version,
+                      running: server.local
+                        ? (server.running ?? !!localApplication?.running)
+                        : server.running,
+                      instanceId:
+                        server.instanceId ??
+                        (server.local &&
+                        localApplication?.pkgManager === 'Docker'
+                          ? 'default'
+                          : undefined),
+                      native: server.local && !!localApplication?.manageable,
+                    }))}
                     onChanged={refresh}
                   />
-                )
-              )}
-              {env.data?.activeTaskId && (
-                <Button
-                  onClick={() =>
-                    setTask({
-                      id: env.data!.activeTaskId!,
-                      title: '数据库安装任务',
-                    })
+                ) : dockerInstance && selected ? (
+                  <DatabaseInstanceControl
+                    key={id}
+                    engine="mysql"
+                    instanceId={dockerInstance}
+                    name={selected.name}
+                    version={
+                      selected.version ?? localApplication?.version ?? undefined
+                    }
+                    running={selected.running ?? !!localApplication?.running}
+                    onChanged={refresh}
+                  />
+                ) : (
+                  (!selected || selected.local) &&
+                  env.data?.application && (
+                    <ApplicationServiceControl
+                      app={env.data.application}
+                      onChanged={refresh}
+                    />
+                  )
+                )}
+                {env.data?.activeTaskId && (
+                  <Button
+                    onClick={() =>
+                      setTask({
+                        id: env.data!.activeTaskId!,
+                        title: '数据库安装任务',
+                      })
+                    }
+                  >
+                    查看安装任务
+                  </Button>
+                )}
+              </Space>
+              <Space wrap>
+                <Select
+                  placeholder="选择 MySQL 实例"
+                  style={{
+                    width: LAYOUT.databaseSelectWidth,
+                    maxWidth: '100%',
+                  }}
+                  value={allMode ? '__all__' : id}
+                  options={[
+                    { value: '__all__', label: '全部' },
+                    ...(list.data?.map((s) => ({
+                      value: s.id,
+                      label: `${mysqlLabel(s)}${s.running === false ? '（已停止）' : ''}`,
+                    })) ?? []),
+                  ]}
+                  onChange={(v) => {
+                    if (v === '__all__') {
+                      setAllMode(true);
+                    } else {
+                      setAllMode(false);
+                      setSid(v);
+                    }
+                    setDeleting(undefined);
+                    setDatabaseSettings(undefined);
+                    setBatchModal(undefined);
+                    setPage(1);
+                    setSelectedDBs([]);
+                  }}
+                />
+                <Input.Search
+                  allowClear
+                  placeholder="请输入数据库名"
+                  onSearch={(value) => {
+                    setKeyword(value);
+                    setPage(1);
+                    setSelectedDBs([]);
+                  }}
+                  style={{ width: LAYOUT.appSearchWidth, maxWidth: '100%' }}
+                />
+                <Tooltip title="刷新">
+                  <Button
+                    aria-label="刷新"
+                    icon={<RotateCw size={16} strokeWidth={1.9} />}
+                    onClick={refresh}
+                  />
+                </Tooltip>
+                <Popover
+                  trigger="click"
+                  title="显示列"
+                  content={
+                    <Space direction="vertical">
+                      {columns.error && (
+                        <Alert type="error" message={columns.error.message} />
+                      )}
+                      <Checkbox.Group
+                        options={columnOptions}
+                        value={visible}
+                        disabled={
+                          columnsSaving || columns.isPending || columns.isError
+                        }
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 8,
+                        }}
+                        onChange={async (values) => {
+                          setColumnsSaving(true);
+                          try {
+                            const result = await request<{ columns: string[] }>(
+                              '/api/db/columns',
+                              {
+                                method: 'PUT',
+                                data: {
+                                  columns: Array.from(
+                                    new Set([...values, 'actions']),
+                                  ),
+                                },
+                              },
+                            );
+                            client.setQueryData(['database-columns'], result);
+                          } finally {
+                            setColumnsSaving(false);
+                          }
+                        }}
+                      />
+                    </Space>
                   }
                 >
-                  查看安装任务
+                  <Button
+                    aria-label="显示列"
+                    title="显示列"
+                    icon={<Settings size={16} strokeWidth={1.9} />}
+                  />
+                </Popover>
+              </Space>
+            </Flex>
+          </Card>
+          {!allMode && selected?.running === false ? (
+            <Card>
+              <Empty description="所选实例已停止" />
+            </Card>
+          ) : !selected && !allMode ? (
+            <Card>
+              <Empty description="正在识别数据库，若加载失败请刷新重试">
+                <Button type="primary" onClick={() => setServerForm({})}>
+                  添加远程数据库
                 </Button>
-              )}
-            </Space>
-            <Space wrap>
-              <Select
-                placeholder="选择 MySQL 实例"
-                style={{ width: LAYOUT.databaseSelectWidth, maxWidth: '100%' }}
-                value={allMode ? '__all__' : id}
-                options={[
-                  { value: '__all__', label: '全部' },
-                  ...(list.data?.map((s) => ({
-                    value: s.id,
-                    label: `${mysqlLabel(s)}${s.running === false ? '（已停止）' : ''}`,
-                  })) ?? []),
-                ]}
-                onChange={(v) => {
-                  if (v === '__all__') {
-                    setAllMode(true);
-                  } else {
-                    setAllMode(false);
-                    setSid(v);
-                  }
-                  setDeleting(undefined);
-                  setDatabaseSettings(undefined);
-                  setBatchModal(undefined);
-                  setPage(1);
-                  setSelectedDBs([]);
-                }}
-              />
-              <Input.Search
-                allowClear
-                placeholder="请输入数据库名"
-                onSearch={(value) => {
-                  setKeyword(value);
-                  setPage(1);
-                  setSelectedDBs([]);
-                }}
-                style={{ width: LAYOUT.appSearchWidth, maxWidth: '100%' }}
-              />
-              <Tooltip title="刷新">
-                <Button
-                  aria-label="刷新"
-                  icon={<RotateCw size={16} strokeWidth={1.9} />}
-                  onClick={refresh}
-                />
-              </Tooltip>
-              <Popover
-                trigger="click"
-                title="显示列"
-                content={
-                  <Space direction="vertical">
-                    {columns.error && (
-                      <Alert type="error" message={columns.error.message} />
-                    )}
-                    <Checkbox.Group
-                      options={columnOptions}
-                      value={visible}
-                      disabled={
-                        columnsSaving || columns.isPending || columns.isError
-                      }
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 8,
-                      }}
-                      onChange={async (values) => {
-                        setColumnsSaving(true);
-                        try {
-                          const result = await request<{ columns: string[] }>(
-                            '/api/db/columns',
-                            {
-                              method: 'PUT',
-                              data: {
-                                columns: Array.from(
-                                  new Set([...values, 'actions']),
-                                ),
-                              },
-                            },
-                          );
-                          client.setQueryData(['database-columns'], result);
-                        } finally {
-                          setColumnsSaving(false);
+              </Empty>
+            </Card>
+          ) : (
+            <Card>
+              <>
+                <ContentSizedTable<DatabaseRow>
+                  fillColumn={[
+                    'name',
+                    '数据库名',
+                    'location',
+                    '数据库位置',
+                    'username',
+                    'remark',
+                  ]}
+                  growColumns={['username', 'remark']}
+                  rowKey={rowKey}
+                  rowSelection={{
+                    selectedRowKeys: selectedDBs,
+                    onChange: setSelectedDBs,
+                    preserveSelectedRowKeys: true,
+                    getCheckboxProps: (row) => ({ disabled: row.system }),
+                  }}
+                  pagination={{
+                    current: currentPage,
+                    pageSize: size,
+                    showSizeChanger: true,
+                    onChange: (p, s) => {
+                      setPage(s === size ? p : 1);
+                      setSize(s);
+                    },
+                  }}
+                  loading={databases.isFetching}
+                  dataSource={filteredDatabases}
+                  footer={() => (
+                    <Flex align="center" gap={SPACING.md} wrap>
+                      <DatabaseSelectAll
+                        pageKeys={pageDatabases.map(rowKey)}
+                        selected={selectedDBs}
+                        onChange={setSelectedDBs}
+                        disabled={busy}
+                      />
+                      <Select
+                        aria-label="批量操作类型"
+                        value={batchAction}
+                        style={{ width: 144, maxWidth: '100%' }}
+                        onChange={setBatchAction}
+                        options={[
+                          { value: 'access', label: '设置权限' },
+                          { value: 'password', label: '修改密码' },
+                          {
+                            value: 'backup',
+                            label: '备份数据库',
+                            disabled: !canBackup,
+                          },
+                          { value: 'delete', label: '删除数据库' },
+                        ]}
+                      />
+                      <Button
+                        disabled={
+                          !selectedDatabases.length ||
+                          busy ||
+                          (batchAction === 'backup' && !canBackup)
                         }
-                      }}
-                    />
-                  </Space>
-                }
-              >
-                <Button
-                  aria-label="显示列"
-                  title="显示列"
-                  icon={<Settings size={16} strokeWidth={1.9} />}
+                        onClick={openBatch}
+                      >
+                        批量操作（已选{selectedDatabases.length}项）
+                      </Button>
+                    </Flex>
+                  )}
+                  columns={databaseColumns.filter(
+                    (column) =>
+                      column.key === 'actions' ||
+                      visible.includes(String(column.key)),
+                  )}
                 />
-              </Popover>
-            </Space>
-          </Flex>
-        </Card>
-        {!allMode && selected?.running === false ? (
-          <Card>
-            <Empty description="所选实例已停止" />
-          </Card>
-        ) : !selected && !allMode ? (
-          <Card>
-            <Empty
-              description={
-                env.data?.localInstalled
-                  ? '正在识别本机数据库，若加载失败请刷新重试'
-                  : '未检测到本机数据库，可安装MySQL或添加远程数据库'
-              }
-            >
-              <Button type="primary" onClick={() => setServerForm({})}>
-                添加远程数据库
-              </Button>
-            </Empty>
-          </Card>
-        ) : (
-          <Card>
-            <>
-              <ContentSizedTable<Database>
-                fillColumn={[
-                  'name',
-                  '数据库名',
-                  'location',
-                  '数据库位置',
-                  'username',
-                  'remark',
-                ]}
-                growColumns={['username', 'remark']}
-                rowKey={(row) =>
-                  `${(row as Database & { _serverId?: string })._serverId || id}:${row.name}`
-                }
-                rowSelection={{
-                  selectedRowKeys: selectedDBs,
-                  onChange: setSelectedDBs,
-                  getCheckboxProps: (row) => ({ disabled: row.system }),
-                }}
-                pagination={{
-                  current: page,
-                  pageSize: size,
-                  showSizeChanger: true,
-                  onChange: (p, s) => {
-                    setPage(p);
-                    setSize(s);
-                  },
-                }}
-                loading={databases.isFetching}
-                dataSource={filteredDatabases}
-                footer={() => (
-                  <Flex align="center" gap={SPACING.md} wrap>
-                    <Checkbox
-                      checked={
-                        pageDatabases.length > 0 &&
-                        pageSelected === pageDatabases.length
-                      }
-                      indeterminate={
-                        pageSelected > 0 && pageSelected < pageDatabases.length
-                      }
-                      disabled={!pageDatabases.length || busy}
-                      onChange={(event) => {
-                        const names = pageDatabases.map(
-                          (database) => database.name,
-                        );
-                        setSelectedDBs(
-                          event.target.checked
-                            ? Array.from(new Set([...selectedDBs, ...names]))
-                            : selectedDBs.filter(
-                                (key) => !names.includes(String(key)),
-                              ),
-                        );
-                      }}
-                    >
-                      全选
-                    </Checkbox>
-                    <Select
-                      aria-label="批量操作类型"
-                      value={batchAction}
-                      style={{ width: 144, maxWidth: '100%' }}
-                      onChange={setBatchAction}
-                      options={[
-                        { value: 'access', label: '设置权限' },
-                        { value: 'password', label: '修改密码' },
-                        {
-                          value: 'backup',
-                          label: '备份数据库',
-                          disabled: !canBackup,
-                        },
-                        { value: 'delete', label: '删除数据库' },
-                      ]}
-                    />
-                    <Button
-                      disabled={
-                        !selectedDatabases.length ||
-                        busy ||
-                        (batchAction === 'backup' && !canBackup)
-                      }
-                      onClick={openBatch}
-                    >
-                      批量操作（已选{selectedDatabases.length}项）
-                    </Button>
-                  </Flex>
-                )}
-                columns={databaseColumns.filter(
-                  (column) =>
-                    column.key === 'actions' ||
-                    visible.includes(String(column.key)),
-                )}
-              />
-            </>
-          </Card>
-        )}
-        {!env.isPending &&
-          !list.isPending &&
-          !env.isError &&
-          !list.isError &&
-          !env.data?.localInstalled &&
-          !selected && (
-            <EnvironmentOverlay
-              engine="mysql"
-              label="MySQL"
-              onRemote={() => setRemoteOpen(true)}
-            />
+              </>
+            </Card>
           )}
-      </div>
+        </div>
+      )}
       <Modal
         open={tab === 'users' && !!id}
         title="数据库用户"
@@ -940,42 +982,31 @@ function MySQLPage() {
           />
         </>
       </Modal>
-      {tab === 'backups' &&
-        (backupServerId ?? id) &&
-        (() => {
-          const targetSid = backupServerId ?? id!;
-          const targetSrv =
-            list.data?.find((item) => item.id === targetSid) ?? selected;
-          const targetCanBackup =
-            (targetSrv?.containerClient ?? false) ||
-            !!env.data?.backupClientInstalled;
-          return (
-            <BackupsModal
-              key={`${targetSid}:${backupFilter ?? ''}`}
-              title={
-                backupFilter ? `[${backupFilter}] 数据库备份` : '数据库备份'
-              }
-              scope={{
-                kind: 'database',
-                serverId: targetSid,
-                database: backupFilter,
-              }}
-              allowCreate={!!targetSid && !!backupFilter && targetCanBackup}
-              createDisabledReason={
-                backupFilter
-                  ? '请先安装数据库备份客户端'
-                  : '请从数据库备份列选择需要手动备份的数据库'
-              }
-              onClose={() => {
-                setBackupServerId(undefined);
-                setTab('databases');
-              }}
-              onStarted={(taskId) =>
-                setTask({ id: taskId, title: '备份数据库' })
-              }
-            />
-          );
-        })()}
+      {tab === 'backups' && backupServerId && (
+        <BackupsModal
+          key={`${backupServerId}:${backupFilter ?? ''}`}
+          title={
+            backupFilter
+              ? `[${backupFilter}] 数据库备份${backupServer ? ` · ${mysqlLabel(backupServer)}` : ''}`
+              : '数据库备份'
+          }
+          scope={{
+            kind: 'database',
+            serverId: backupServerId,
+            database: backupFilter,
+          }}
+          allowCreate={!!backupFilter && canCreateBackup}
+          createDisabledReason={
+            !backupServer
+              ? '当前备份的数据库实例不可用'
+              : backupFilter
+                ? '请先安装数据库备份客户端'
+                : '请从数据库备份列选择需要手动备份的数据库'
+          }
+          onClose={() => setTab('databases')}
+          onStarted={(taskId) => setTask({ id: taskId, title: '备份数据库' })}
+        />
+      )}
       {importDatabase && (
         <DatabaseImportModal
           serverId={importDatabase.serverId}
@@ -1052,7 +1083,9 @@ function MySQLPage() {
                   (rows) => rows?.filter((row) => row.name !== removed.name),
                 );
                 setSelectedDBs((prev) =>
-                  prev.filter((name) => name !== removed.name),
+                  prev.filter(
+                    (key) => key !== `${removed.serverId}:${removed.name}`,
+                  ),
                 );
                 if (result.taskId)
                   setTask({ id: result.taskId, title: '删除数据库' });
@@ -1107,34 +1140,16 @@ function MySQLPage() {
             onSaved={refresh}
           />
         )}
-      {batchModal &&
-        id &&
-        (() => {
-          const batchSid =
-            (selectedDatabases[0] as DatabaseRow | undefined)?._serverId ?? id;
-          return (
-            <DatabaseBatchModal
-              serverId={batchSid}
-              action={batchModal}
-              databases={selectedDatabases}
-              recyclable={recyclable}
-              onClose={() => setBatchModal(undefined)}
-              onStarted={(taskId) => {
-                if (batchModal === 'delete') {
-                  const removed = new Set(
-                    selectedDatabases.map((database) => database.name),
-                  );
-                  client.setQueryData<Database[]>(
-                    ['db-databases', batchSid],
-                    (rows) => rows?.filter((row) => !removed.has(row.name)),
-                  );
-                }
-                setTask({ id: taskId, title: '数据库批量操作' });
-                setSelectedDBs([]);
-              }}
-            />
-          );
-        })()}
+      {batchModal && (
+        <DatabaseBatchModal
+          {...batchModal}
+          onClose={() => setBatchModal(undefined)}
+          onStarted={(taskId) => {
+            setTask({ id: taskId, title: '数据库批量操作' });
+            setSelectedDBs([]);
+          }}
+        />
+      )}
       {databaseSettings?.kind === 'password' &&
         (databaseSettings.database._serverId ?? id) && (
           <DatabasePasswordModal

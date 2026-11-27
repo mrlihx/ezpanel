@@ -36,3 +36,20 @@ func TestExtractExpectedSHA256(t *testing.T) {
 		t.Fatal("expected error for missing artifact")
 	}
 }
+
+func TestPanelRevisionOrdering(t *testing.T) {
+	for _, tc := range []struct {
+		current, latest string
+		newer           bool
+	}{
+		{"0.1.2", "v0.1.2-r1", true},
+		{"v0.1.2-r9", "v0.1.2-r10", true},
+		{"v0.1.2-r10", "v0.1.2-r9", false},
+		{"v0.1.2-r10", "v0.1.2", false},
+		{"v0.1.2-r10", "v0.1.3", true},
+	} {
+		if got := isNewerPanelRelease(tc.current, tc.latest); got != tc.newer {
+			t.Errorf("%s -> %s: got %v, want %v", tc.current, tc.latest, got, tc.newer)
+		}
+	}
+}

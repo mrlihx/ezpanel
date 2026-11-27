@@ -191,20 +191,6 @@ export const siteConfig = (id: string) =>
     `/api/websites/${encodeURIComponent(id)}/config`,
     { silentError: true },
   );
-export const reloadNginx = () =>
-  request<{ running: boolean }>('/api/websites/nginx/reload', {
-    method: 'POST',
-  });
-export const installNginx = () =>
-  request<{ taskId: string }>('/api/software/install', {
-    method: 'POST',
-    data: { id: 'nginx' },
-  });
-export const nginxService = (action: string) =>
-  request<{ running: boolean }>('/api/software/service', {
-    method: 'POST',
-    data: { id: 'nginx', action },
-  });
 export const siteCertificate = (id: string) =>
   request<{ certificate: string; privateKey: string }>(
     `/api/websites/${encodeURIComponent(id)}/ssl`,

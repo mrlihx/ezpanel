@@ -242,15 +242,21 @@ func writeInitial(path, content string, mode os.FileMode) error {
 	return e
 }
 func (m *Manager) InstallRelease(ctx context.Context, id, version string, onLine func(string), selected ...SourceSelection) (State, error) {
+	if id == "frp" {
+		return m.installFRP(ctx, version, []string{"frps"}, false, onLine)
+	}
 	if isHostTool(id) {
 		return m.installPackage(ctx, id, version, onLine)
 	}
 	if UsesDocker(id) {
 		return m.installDocker(ctx, id, version, onLine, selected...)
 	}
-	return m.installRelease(ctx, id, version, false, false, onLine, selected...)
+	return m.installRelease(ctx, id, version, false, onLine, selected...)
 }
 func (m *Manager) UpdateRelease(ctx context.Context, id, version string, onLine func(string), selected ...SourceSelection) (State, error) {
+	if id == "frp" {
+		return m.installFRP(ctx, version, nil, true, onLine)
+	}
 	if isHostTool(id) {
 		return m.updateHostTool(ctx, id, version, onLine)
 	}
@@ -260,9 +266,9 @@ func (m *Manager) UpdateRelease(ctx context.Context, id, version string, onLine 
 	if UsesDocker(id) {
 		return State{}, ErrUnsupported
 	}
-	return m.installRelease(ctx, id, version, true, false, onLine, selected...)
+	return m.installRelease(ctx, id, version, true, onLine, selected...)
 }
-func (m *Manager) installRelease(ctx context.Context, id, version string, updating, switching bool, onLine func(string), selected ...SourceSelection) (State, error) {
+func (m *Manager) installRelease(ctx context.Context, id, version string, updating bool, onLine func(string), selected ...SourceSelection) (State, error) {
 	choice := m.InstalledSource(id)
 	if len(selected) != 0 {
 		choice = selected[0]
@@ -295,10 +301,7 @@ func (m *Manager) installRelease(ctx context.Context, id, version string, updati
 		if e != nil || !state.Installed {
 			return state, errors.New("仅支持更新本商店官方源安装的软件")
 		}
-		if switching && version == previous.Version {
-			return state, errors.New("请选择不同的Nginx版本")
-		}
-		if !switching && (series(previous.Version) != series(version) || !newer(version, previous.Version)) {
+		if series(previous.Version) != series(version) || !newer(version, previous.Version) {
 			return state, errors.New("更新目标须为当前版本系列中较新的补丁版本")
 		}
 		if m.upgradeBusy(ctx, id) {
@@ -713,6 +716,9 @@ func (m *Manager) installRelease(ctx context.Context, id, version string, updati
 		binDir := prefix + "/bin"
 		if e = os.Rename(src, binDir); e != nil {
 			return state, e
+		}
+		if e = m.ensureDockerCompose(ctx, binDir+"/docker", onLine); e != nil {
+			return state, fmt.Errorf("准备 Docker Compose 失败：%w", e)
 		}
 		for _, binary := range []string{"docker", "dockerd"} {
 			if _, err := os.Stat(binDir + "/" + binary); err == nil {

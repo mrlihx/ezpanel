@@ -25,7 +25,7 @@ func (m *Module) ui(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !p.Enabled || m.status(p) != "running" {
+	if !p.Enabled || p.Operation != nil || m.status(p) != "running" {
 		response.Fail(c, 3004, "插件未运行")
 		return
 	}
@@ -33,12 +33,21 @@ func (m *Module) ui(c *gin.Context) {
 		response.Fail(c, response.NotFound, "版本不存在")
 		return
 	}
-	name := strings.TrimPrefix(c.Param("asset"), "/")
+	var manifest Manifest
+	if json.Unmarshal([]byte(p.Manifest), &manifest) != nil || manifest.UIMode != "legacy" {
+		response.Fail(c, response.NotFound, "资源不存在")
+		return
+	}
+	c.Header("Content-Security-Policy", isolatedDocument)
+	m.serveAsset(c, p.ID, strings.TrimPrefix(c.Param("asset"), "/"))
+}
+
+func (m *Module) serveAsset(c *gin.Context, id, name string) {
 	if !packagePath(name) {
 		response.Fail(c, response.NotFound, "资源不存在")
 		return
 	}
-	root := filepath.Join(m.packages(), p.ID, "web")
+	root := filepath.Join(m.packages(), id, "web")
 	realRoot, e := filepath.EvalSymlinks(root)
 	if e != nil {
 		response.Fail(c, response.NotFound, "资源不存在")
@@ -65,16 +74,30 @@ func (m *Module) ui(c *gin.Context) {
 		contentType = "application/octet-stream"
 	}
 	c.Header("Content-Type", contentType)
-	c.Header("Cache-Control", "no-cache")
+	if c.Writer.Header().Get("Cache-Control") == "" {
+		c.Header("Cache-Control", "no-cache")
+	}
 	c.Header("X-Content-Type-Options", "nosniff")
 	http.ServeContent(c.Writer, c.Request, info.Name(), info.ModTime(), f)
 }
+var sharedPluginProxyTransport = &http.Transport{
+	Proxy:                 nil,
+	MaxIdleConns:          64,
+	MaxIdleConnsPerHost:   16,
+	IdleConnTimeout:       60 * time.Second,
+	ResponseHeaderTimeout: 60 * time.Second,
+}
+
 func (m *Module) proxy(c *gin.Context) {
 	p, ok := m.row(c)
 	if !ok {
 		return
 	}
 	rest := strings.TrimPrefix(c.Param("rest"), "/")
+	if rest == jobCallback || rest == eventCallback || rest == notificationCallback || rest == serviceCallback || rest == monitorCallback || rest == dnsCallback || rest == deploymentCallback || strings.HasPrefix(rest, storageCallback) {
+		response.Fail(c, response.Forbidden, "该路由由面板内部调用")
+		return
+	}
 	if rest != "" && !packagePath(rest) {
 		response.Fail(c, response.Invalid, "代理路径无效")
 		return
@@ -83,8 +106,13 @@ func (m *Module) proxy(c *gin.Context) {
 	r := m.runs[p.ID]
 	ready := r != nil && m.statuses[p.ID] == "running"
 	m.mu.Unlock()
-	if !p.Enabled || p.Type != "process" || !ready {
+	if !p.Enabled || p.Operation != nil || p.Type != "process" || !ready {
 		response.Fail(c, 3004, "插件未运行")
+		return
+	}
+	var manifest Manifest
+	if json.Unmarshal([]byte(p.Manifest), &manifest) != nil {
+		response.Fail(c, response.System, "插件清单无效")
 		return
 	}
 	session := auth.Current(c)
@@ -114,7 +142,7 @@ func (m *Module) proxy(c *gin.Context) {
 	target := "127.0.0.1:" + strconv.Itoa(r.port)
 	prefix := "/plugin/" + p.ID + "/api/"
 	proxy := &httputil.ReverseProxy{}
-	proxy.Transport = &http.Transport{Proxy: nil, ResponseHeaderTimeout: 60 * time.Second, DisableKeepAlives: true}
+	proxy.Transport = sharedPluginProxyTransport
 	proxy.FlushInterval = -1
 	proxy.Rewrite = func(pReq *httputil.ProxyRequest) {
 		req := pReq.Out
@@ -135,6 +163,13 @@ func (m *Module) proxy(c *gin.Context) {
 	}
 	proxy.ModifyResponse = func(res *http.Response) error {
 		res.Header.Del("Set-Cookie")
+		res.Header.Del("Clear-Site-Data")
+		res.Header.Del("Service-Worker-Allowed")
+		res.Header.Del("Refresh")
+		if manifest.UIMode != "legacy" {
+			res.Header.Set("Content-Security-Policy", isolatedDocument)
+			res.Header.Set("X-Content-Type-Options", "nosniff")
+		}
 		if res.StatusCode == http.StatusSwitchingProtocols || strings.HasPrefix(strings.ToLower(res.Header.Get("Content-Type")), "text/event-stream") {
 			timer.Stop()
 		}

@@ -24,9 +24,25 @@ const (
 	Internal     = 5000
 )
 
+var failHTTPStatus = map[int]int{
+	Invalid:     400,
+	Unauthorized: 401,
+	Forbidden:   403,
+	NotFound:    404,
+	Conflict:    409,
+	TooLarge:    413,
+	RateLimited: 429,
+	System:      500,
+	Internal:    500,
+	3001:        400,
+	3002:        409,
+	3003:        500,
+	3004:        503,
+}
+
 func OK(c *gin.Context, data any) { c.JSON(200, gin.H{"code": 0, "msg": "ok", "data": data}) }
 func Fail(c *gin.Context, code int, msg string) {
-	status := map[int]int{Invalid: 400, Unauthorized: 401, Forbidden: 403, NotFound: 404, Conflict: 409, TooLarge: 413, RateLimited: 429, System: 500, Internal: 500, 3001: 400, 3002: 409, 3003: 500, 3004: 503}[code]
+	status := failHTTPStatus[code]
 	if status == 0 {
 		status = 500
 		code = Internal

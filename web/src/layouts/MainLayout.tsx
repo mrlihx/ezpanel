@@ -1,6 +1,7 @@
 import {
   Suspense,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -26,26 +27,18 @@ import {
 } from 'antd';
 import {
   Bell,
-  Clock,
   Cloud,
   Container,
-  Database,
-  FolderOpen,
+  ExternalLink,
   Globe,
   LayoutDashboard,
   LayoutGrid,
-  LogOut,
   Menu as MenuIcon,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
-  ScrollText,
-  Settings,
-  Shield,
-  ShieldAlert,
   Sun,
   TerminalSquare,
-  Wrench,
 } from 'lucide-react';
 import {
   Link,
@@ -55,6 +48,7 @@ import {
   useNavigate,
 } from 'react-router-dom';
 import { logout } from '../api/auth';
+import { panelSettings } from '../api/settings';
 import { panelStatus } from '../api/sysinfo';
 import { useAuth } from '../stores/auth';
 import { useTheme } from '../stores/theme';
@@ -62,75 +56,16 @@ import { LAYOUT, SPACING } from '../styles/tokens';
 import MessageBox from '../components/MessageBox';
 import PanelUpdateModal from '../components/PanelUpdateModal';
 import { useIdleSession } from '../hooks/useIdleSession';
+import {
+  buildMenuLayout,
+  lockedMenuKeys,
+  logoutMenuItem,
+  menuGroupKey,
+  pages,
+  renderMenuGroupIcon,
+  type SidebarPageItem,
+} from './menuItems';
 import './MainLayout.css';
-
-export const pages = [
-  {
-    key: '/',
-    label: '概览',
-    icon: <LayoutDashboard size={17} strokeWidth={1.85} />,
-  },
-  {
-    key: '/websites',
-    label: '网站',
-    icon: <Globe size={17} strokeWidth={1.85} />,
-  },
-  {
-    key: '/databases',
-    label: '数据库',
-    icon: <Database size={17} strokeWidth={1.85} />,
-  },
-  {
-    key: '/docker',
-    label: 'Docker',
-    icon: <Container size={17} strokeWidth={1.85} />,
-  },
-  {
-    key: '/security',
-    label: '安全',
-    icon: <Shield size={17} strokeWidth={1.85} />,
-  },
-  {
-    key: '/waf',
-    label: 'WAF',
-    icon: <ShieldAlert size={17} strokeWidth={1.85} />,
-  },
-  {
-    key: '/files',
-    label: '文件',
-    icon: <FolderOpen size={17} strokeWidth={1.85} />,
-  },
-  {
-    key: '/crons',
-    label: '计划任务',
-    icon: <Clock size={17} strokeWidth={1.85} />,
-  },
-  {
-    key: '/terminal',
-    label: '终端',
-    icon: <TerminalSquare size={17} strokeWidth={1.85} />,
-  },
-  {
-    key: '/oplogs',
-    label: '操作日志',
-    icon: <ScrollText size={17} strokeWidth={1.85} />,
-  },
-  {
-    key: '/apps',
-    label: '应用商店',
-    icon: <LayoutGrid size={17} strokeWidth={1.85} />,
-  },
-  {
-    key: '/tools',
-    label: '工具',
-    icon: <Wrench size={17} strokeWidth={1.85} />,
-  },
-  {
-    key: '/settings',
-    label: '设置',
-    icon: <Settings size={17} strokeWidth={1.85} />,
-  },
-];
 
 // iOS 底部液态玻璃导航栏的 5 个核心页签
 const mobileDockItems = [
@@ -207,15 +142,89 @@ export default function MainLayout() {
     ? 0
     : mobileTopHeaderHeight + mobileBottomDockSpace;
   const location = useLocation();
+  const settingsQuery = useQuery({
+    queryKey: ['panel-settings'],
+    queryFn: panelSettings,
+    staleTime: 5 * 60 * 1000,
+  });
+  const hiddenMenuSet = useMemo(
+    () =>
+      new Set(
+        (settingsQuery.data?.hiddenMenus ?? []).filter(
+          (key) => !lockedMenuKeys.has(key),
+        ),
+      ),
+    [settingsQuery.data?.hiddenMenus],
+  );
+  const menuOrder = useMemo(
+    () => settingsQuery.data?.menuOrder ?? [],
+    [settingsQuery.data?.menuOrder],
+  );
+  const menuGroups = useMemo(
+    () => settingsQuery.data?.menuGroups ?? [],
+    [settingsQuery.data?.menuGroups],
+  );
+  const overviewItem = pages.find((item) => item.key === '/')!;
+  const configurableBuiltinPages = useMemo(
+    () =>
+      pages.filter((item) => item.key !== '/' && !hiddenMenuSet.has(item.key)),
+    [hiddenMenuSet],
+  );
+  const visibleMobileDockItems = useMemo(
+    () => mobileDockItems.filter((item) => !hiddenMenuSet.has(item.key)),
+    [hiddenMenuSet],
+  );
   const pluginQuery = usePluginList(true);
-  const pluginMenus = (pluginQuery.data ?? [])
-    .filter((p) => p.runtimeStatus === 'running' && p.menu)
-    .sort((a, b) => a.menu!.order - b.menu!.order || a.id.localeCompare(b.id))
-    .map((p) => ({
-      key: `/p/${p.id}`,
-      label: p.menu!.title,
-      icon: pluginIcon(p.menu!.icon),
-    }));
+  const pluginMenus = useMemo(
+    () =>
+      (pluginQuery.data ?? [])
+        .filter(
+          (p) =>
+            p.runtimeStatus === 'running' &&
+            p.menu &&
+            !hiddenMenuSet.has(`/p/${p.id}`),
+        )
+        .sort(
+          (a, b) => a.menu!.order - b.menu!.order || a.id.localeCompare(b.id),
+        )
+        .map((p) => {
+          const key = `/p/${p.id}`;
+          const openMode: 'embed' | 'new_tab' =
+            p.openMode === 'new_tab' ? 'new_tab' : 'embed';
+          return {
+            key,
+            label: p.menu!.title,
+            icon: pluginIcon(p.menu!.icon),
+            openMode,
+            children: p.menu!.children?.map((child) => ({
+              key: `${key}/${child.path}`,
+              label: child.title,
+              openMode,
+              icon: child.icon ? pluginIcon(child.icon) : undefined,
+            })),
+          };
+        }),
+    [pluginQuery.data, hiddenMenuSet],
+  );
+  type SidebarPluginItem = (typeof pluginMenus)[number];
+  type SidebarMenuEntry = SidebarPageItem | SidebarPluginItem;
+  const menuLayout = useMemo(
+    () =>
+      buildMenuLayout<SidebarMenuEntry>({
+        builtinItems: configurableBuiltinPages,
+        pluginItems: pluginMenus,
+        menuOrder,
+        menuGroups,
+        hideEmptyGroups: true,
+      }),
+    [configurableBuiltinPages, pluginMenus, menuOrder, menuGroups],
+  );
+  const activePluginKey = matchPath('/p/:id/*', location.pathname)?.params.id;
+  const pluginParentKey = activePluginKey ? `/p/${activePluginKey}` : undefined;
+  const [menuOpenState, setMenuOpenState] = useState<{
+    routeMarker: string;
+    keys: string[];
+  }>({ routeMarker: '', keys: [] });
   const navigate = useNavigate();
   const user = useAuth((s) => s.user);
   const setUser = useAuth((s) => s.setUser);
@@ -487,14 +496,19 @@ export default function MainLayout() {
     window.location.replace('/login');
   };
 
+  const pluginLinks = pluginMenus.flatMap((item) =>
+    item.children?.length ? [...item.children, item] : [item],
+  );
   const selectedKey =
-    [...pages, ...pluginMenus].find(({ key }) =>
-      matchPath({ path: key, end: key === '/' }, location.pathname),
-    )?.key ?? location.pathname;
+    [...pages, ...pluginLinks]
+      .filter(({ key }) =>
+        matchPath({ path: key, end: key === '/' }, location.pathname),
+      )
+      .sort((a, b) => b.key.length - a.key.length)[0]?.key ?? location.pathname;
 
   const currentPageTitle =
     pages.find((p) => p.key === selectedKey)?.label ||
-    pluginMenus.find((p) => p.key === selectedKey)?.label ||
+    pluginLinks.find((p) => p.key === selectedKey)?.label ||
     user?.alias ||
     'ezpanel';
 
@@ -504,7 +518,7 @@ export default function MainLayout() {
       currentPageTitle === brand ? brand : `${currentPageTitle} · ${brand}`;
   }, [currentPageTitle, user?.alias]);
 
-  const activeDockIndex = mobileDockItems.findIndex(
+  const activeDockIndex = visibleMobileDockItems.findIndex(
     (item) => item.key === selectedKey,
   );
   const dockBarRef = useRef<HTMLDivElement>(null);
@@ -536,7 +550,7 @@ export default function MainLayout() {
       const rect = bar.getBoundingClientRect();
       const pad = 5;
       const innerWidth = Math.max(1, rect.width - pad * 2);
-      const count = mobileDockItems.length;
+      const count = Math.max(1, visibleMobileDockItems.length);
       const cellWidth = innerWidth / count;
       const relX = clientX - rect.left - pad;
       const rawFloat = (relX - cellWidth / 2) / cellWidth;
@@ -587,7 +601,7 @@ export default function MainLayout() {
       if (!st) return;
       dockDragStateRef.current = null;
       const targetIndex = st.hoverIndex;
-      const targetItem = mobileDockItems[targetIndex];
+      const targetItem = visibleMobileDockItems[targetIndex];
       setDockDrag(null);
       if (targetItem && targetItem.key !== selectedKey) {
         setPendingDock({ from: selectedKey, index: targetIndex });
@@ -605,7 +619,68 @@ export default function MainLayout() {
       bar.removeEventListener('touchend', finishTouch);
       bar.removeEventListener('touchcancel', finishTouch);
     };
-  }, [lg, navigate, selectedKey]);
+  }, [lg, navigate, selectedKey, visibleMobileDockItems]);
+
+  const activeLeafKey = pluginParentKey ?? selectedKey;
+  const parentGroupKey = menuLayout.groupByItemKey.get(activeLeafKey);
+  const activeOpenKeys = [parentGroupKey, pluginParentKey].filter(
+    (k): k is string => !!k,
+  );
+  const activeRouteMarker = activeOpenKeys.join('|');
+  const resolvedOpenKeys =
+    menuOpenState.routeMarker !== activeRouteMarker && activeOpenKeys.length > 0
+      ? [...new Set([...menuOpenState.keys, ...activeOpenKeys])]
+      : menuOpenState.keys;
+
+  const renderMenuLabel = (
+    targetKey: string,
+    title: string,
+    openMode: 'embed' | 'new_tab',
+  ) =>
+    openMode === 'new_tab' ? (
+      <a
+        href={targetKey}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+        }}
+      >
+        <span>{title}</span>
+        <ExternalLink size={12} strokeWidth={1.85} />
+      </a>
+    ) : (
+      <Link to={targetKey}>{title}</Link>
+    );
+
+  const renderLeafMenuItem = (entry: SidebarMenuEntry) => {
+    if ('openMode' in entry) {
+      return entry.children?.length
+        ? {
+            key: entry.key,
+            icon: entry.icon,
+            label: entry.label,
+            children: entry.children.map((child) => ({
+              key: child.key,
+              icon: child.icon,
+              label: renderMenuLabel(child.key, child.label, child.openMode),
+            })),
+          }
+        : {
+            key: entry.key,
+            icon: entry.icon,
+            children: undefined,
+            label: renderMenuLabel(entry.key, entry.label, entry.openMode),
+          };
+    }
+    return {
+      key: entry.key,
+      icon: entry.icon,
+      label: <Link to={entry.key}>{entry.label}</Link>,
+    };
+  };
 
   const toggleLabel = lg ? (collapsed ? '展开菜单' : '收起菜单') : '关闭菜单';
   const themeLabel = dark ? '切换浅色模式' : '切换深色模式';
@@ -704,30 +779,28 @@ export default function MainLayout() {
           borderInlineEnd: 'none',
         }}
         selectedKeys={[selectedKey]}
+        openKeys={resolvedOpenKeys}
+        onOpenChange={(keys) =>
+          setMenuOpenState({ routeMarker: activeRouteMarker, keys })
+        }
         items={[
-          ...pages.map((item) => ({
-            ...item,
-            label: <Link to={item.key}>{item.label}</Link>,
-          })),
+          renderLeafMenuItem(overviewItem),
+          ...menuLayout.nodes.map((node) =>
+            node.type === 'group'
+              ? {
+                  key: menuGroupKey(node.group.id),
+                  icon: renderMenuGroupIcon(node.group.icon),
+                  label: node.group.title,
+                  children: node.items.map(renderLeafMenuItem),
+                }
+              : renderLeafMenuItem(node.item),
+          ),
           {
-            key: 'logout',
-            label: '退出',
-            icon: <LogOut size={17} strokeWidth={1.85} />,
+            key: logoutMenuItem.key,
+            label: logoutMenuItem.label,
+            icon: logoutMenuItem.icon,
             className: 'panel-menu-logout',
           },
-          ...(pluginMenus.length
-            ? [
-                {
-                  key: 'plugin-group',
-                  type: 'group' as const,
-                  label: '扩展应用',
-                  children: pluginMenus.map((item) => ({
-                    ...item,
-                    label: <Link to={item.key}>{item.label}</Link>,
-                  })),
-                },
-              ]
-            : []),
         ]}
         onClick={({ key, domEvent }) => {
           if (key === 'logout') {
@@ -751,6 +824,16 @@ export default function MainLayout() {
             return;
           }
           setDrawer(false);
+          const pluginEntry = pluginLinks.find((link) => link.key === key);
+          if (pluginEntry?.openMode === 'new_tab') {
+            if (!(
+              domEvent.target instanceof HTMLElement &&
+              domEvent.target.closest('a')
+            )) {
+              window.open(key, '_blank', 'noopener,noreferrer');
+            }
+            return;
+          }
           if (!(
             domEvent.target instanceof HTMLElement &&
             domEvent.target.closest('a')
@@ -1014,7 +1097,7 @@ export default function MainLayout() {
                 }
               />
             )}
-            {mobileDockItems.map((item, idx) => {
+            {visibleMobileDockItems.map((item, idx) => {
               const currentVisualIndex = dockDrag
                 ? dockDrag.hoverIndex
                 : (pendingDockIndex ?? activeDockIndex);
@@ -1042,10 +1125,12 @@ export default function MainLayout() {
         </nav>
       )}
       <MessageBox running={softwareTasks} />
-      <PanelUpdateModal
-        open={updateModalOpen}
-        onClose={() => setUpdateModalOpen(false)}
-      />
+      {updateModalOpen && (
+        <PanelUpdateModal
+          open={updateModalOpen}
+          onClose={() => setUpdateModalOpen(false)}
+        />
+      )}
     </Layout>
   );
 }

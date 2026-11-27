@@ -128,6 +128,20 @@ func New(db *gorm.DB, cfg config.Config, tasks *task.Manager, databases *databas
 func (m *Module) Name() string { return "cron" }
 func (m *Module) Close()       { ctx := m.engine.Stop(); <-ctx.Done() }
 
+func (m *Module) ValidatePluginSchedule(expression string) error {
+	_, _, err := m.preview(expression)
+	return err
+}
+
+func (m *Module) AddPluginSchedule(expression string, run func()) (func(), error) {
+	schedule, _, err := m.preview(expression)
+	if err != nil {
+		return nil, err
+	}
+	id := m.engine.Schedule(schedule, robcron.FuncJob(run))
+	return func() { m.engine.Remove(id) }, nil
+}
+
 // SetBlockedPorts 供插件运行器提供当前Host API及插件监听端口；每次实际拨号重新取值。
 func (m *Module) SetBlockedPorts(f func() []int) { m.mu.Lock(); m.blockedPorts = f; m.mu.Unlock() }
 
@@ -766,9 +780,7 @@ func (m *Module) submit(id, user, ip string, auto bool) (string, error) {
 	return taskID, e
 }
 func (m *Module) skipped(r store.CronJob, reason string) {
-	user := "system"
-	_ = user
-	_ = reason
+	slog.Info("跳过计划任务", "id", r.ID, "name", r.Name, "reason", reason)
 }
 
 func (m *Module) hasRunning(id string) bool {

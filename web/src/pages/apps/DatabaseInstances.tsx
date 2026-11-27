@@ -67,7 +67,13 @@ export default function DatabaseInstances({
       title: `卸载「${instance.name}」？`,
       content: (
         <Space direction="vertical">
-          <span>将移除该实例的容器，数据和配置会保留。</span>
+          <span>
+            {app.id === 'memcached'
+              ? '将移除该实例的容器，配置会保留。'
+              : app.id === 'redis'
+                ? '请在实例运行时清空所有逻辑库中的键，再卸载实例。'
+                : '请在实例运行时删除全部用户数据库，再卸载实例。'}
+          </span>
           <Input
             placeholder={`输入 ${instance.name} 确认`}
             onChange={(event) => {

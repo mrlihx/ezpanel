@@ -1,17 +1,6 @@
 import ApplicationSettingsForm from '../../components/ApplicationSettingsForm';
 import { useState } from 'react';
-import {
-  Alert,
-  App,
-  Button,
-  Form,
-  Input,
-  Modal,
-  Segmented,
-  Select,
-  Skeleton,
-  Space,
-} from 'antd';
+import { Alert, App, Button, Form, Input, Modal, Skeleton, Space } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   rsyncWorkspaceQuery,
@@ -22,7 +11,7 @@ import {
 } from '../../api/rsync';
 import ContentSizedTable from '../../components/ContentSizedTable';
 import { useMessageBox } from '../../stores/messageBox';
-import HostToolDirectory from './HostToolDirectory';
+import RsyncSenderEditor from './RsyncSenderEditor';
 
 export default function RsyncWorkspace({
   section,
@@ -36,8 +25,6 @@ export default function RsyncWorkspace({
   const config = useQuery(rsyncWorkspaceQuery);
   const [sender, setSender] = useState<RsyncSender>();
   const [rule, setRule] = useState<RsyncRule>();
-  const [mode, setMode] = useState<'remote' | 'local'>('remote');
-  const [senderForm] = Form.useForm<RsyncSender>();
   const [ruleForm] = Form.useForm<RsyncRule>();
   const save = useMutation({
     mutationFn: saveRsyncWorkspace,
@@ -162,16 +149,21 @@ export default function RsyncWorkspace({
     );
   }
 
-  function openSender(row: RsyncSender) {
-    setMode(row.destination.startsWith('/') ? 'local' : 'remote');
-    setSender(row);
-  }
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Button
         type="primary"
         onClick={() =>
-          openSender({ id: '', name: '', source: '', destination: '' })
+          setSender({
+            id: '',
+            name: '',
+            source: '',
+            destination: '',
+            mode: 'incremental',
+            bandwidthKb: 1024,
+            schedule: 'interval',
+            checkMinutes: 0,
+          })
         }
       >
         创建发送任务
@@ -184,8 +176,27 @@ export default function RsyncWorkspace({
         scroll={{ x: 'max-content' }}
         columns={[
           { title: '任务名称', dataIndex: 'name' },
-          { title: '源目录', dataIndex: 'source' },
+          { title: '数据源目录', dataIndex: 'source' },
           { title: '目标', dataIndex: 'destination' },
+          {
+            title: '同步方式',
+            dataIndex: 'mode',
+            render: (value) => (value === 'full' ? '完全' : '增量'),
+          },
+          {
+            title: '限速',
+            dataIndex: 'bandwidthKb',
+            render: (value: number) => (value ? `${value} KB/s` : '不限速'),
+          },
+          {
+            title: '同步周期',
+            render: (_, row) =>
+              row.schedule === 'realtime'
+                ? '实时同步'
+                : row.checkMinutes
+                  ? `每隔 ${row.checkMinutes} 分钟`
+                  : '定时检查已关闭',
+          },
           {
             title: '排除规则',
             render: (_, row) =>
@@ -203,18 +214,16 @@ export default function RsyncWorkspace({
                     modal.confirm({
                       title: `执行发送任务「${row.name}」？`,
                       content:
-                        '同名文件将按源目录更新，目标中的额外文件会保留。',
+                        row.mode === 'full'
+                          ? '完全同步会删除目标端多余文件，排除文件会保留。'
+                          : '同名文件将按数据源目录更新，目标中的额外文件会保留。',
                       onOk: () => run.mutateAsync(row.id),
                     })
                   }
                 >
                   执行
                 </Button>
-                <Button
-                  type="link"
-                  size="small"
-                  onClick={() => openSender(row)}
-                >
+                <Button type="link" size="small" onClick={() => setSender(row)}>
                   编辑
                 </Button>
                 <Button
@@ -241,93 +250,23 @@ export default function RsyncWorkspace({
           },
         ]}
       />
-      <Modal
-        title={sender?.id ? '编辑发送任务' : '创建发送任务'}
-        open={!!sender}
-        destroyOnHidden
-        onCancel={() => setSender(undefined)}
-        onOk={() => senderForm.submit()}
-        confirmLoading={save.isPending}
-      >
-        <ApplicationSettingsForm
-          form={senderForm}
-
-          preserve={false}
-          initialValues={sender}
-          autoComplete="off"
-          onFinish={(fields) => {
-            const row = { ...fields, id: sender?.id ?? '' };
-            save.mutate({
+      {sender && (
+        <RsyncSenderEditor
+          key={sender.id || 'new'}
+          sender={sender}
+          rules={data.rules}
+          saving={save.isPending}
+          onClose={() => setSender(undefined)}
+          onSave={(row) =>
+            save.mutateAsync({
               ...data,
               senders: row.id
                 ? data.senders.map((item) => (item.id === row.id ? row : item))
                 : [...data.senders, row],
-            });
-          }}
-        >
-          <Form.Item name="name" label="任务名称" rules={[{ required: true }]}>
-            <Input maxLength={256} />
-          </Form.Item>
-          <Form.Item name="source" label="源目录" rules={[{ required: true }]}>
-            <HostToolDirectory />
-          </Form.Item>
-          <Form.Item label="目标类型">
-            <Segmented<'remote' | 'local'>
-              value={mode}
-              options={[
-                { value: 'remote', label: '远程 Rsync' },
-                { value: 'local', label: '本机目录' },
-              ]}
-              onChange={(next) => {
-                setMode(next);
-                senderForm.setFieldsValue({
-                  destination: '',
-                  username: '',
-                  password: '',
-                });
-              }}
-            />
-          </Form.Item>
-          <Form.Item
-            name="destination"
-            label={mode === 'remote' ? '接收地址' : '目标目录'}
-            rules={[{ required: true }]}
-          >
-            {mode === 'remote' ? (
-              <Input placeholder="rsync://服务器:873/模块名称" />
-            ) : (
-              <HostToolDirectory />
-            )}
-          </Form.Item>
-          {mode === 'remote' && (
-            <>
-              <Form.Item name="username" label="接收用户名">
-                <Input autoComplete="off" />
-              </Form.Item>
-              <Form.Item name="password" label="接收密码">
-                <Input.Password
-                  autoComplete="new-password"
-                  placeholder={
-                    sender?.id
-                      ? '地址和用户名未变时，留空保留原密码'
-                      : '按接收端设置填写'
-                  }
-                />
-              </Form.Item>
-            </>
-          )}
-          <Form.Item name="ruleId" label="排除规则">
-            <Select
-              allowClear
-              placeholder="选择排除规则"
-              options={data.rules.map((item) => ({
-                value: item.id,
-                label: item.name,
-              }))}
-            />
-          </Form.Item>
-        </ApplicationSettingsForm>
-      </Modal>
+            })
+          }
+        />
+      )}
     </Space>
   );
 }

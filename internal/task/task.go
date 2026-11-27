@@ -51,6 +51,7 @@ type Manager struct {
 	secrets        []string
 	eventMu        sync.Mutex
 	listeners      map[string]map[chan struct{}]struct{}
+	completed      func(store.Task)
 }
 type Log struct {
 	mu        sync.Mutex
@@ -113,7 +114,8 @@ func New(ctx context.Context, db *gorm.DB, cfg config.Config) (*Manager, error) 
 }
 
 func (m *Manager) redact(s string, extra ...string) string {
-	for _, values := range [][]string{m.secrets, extra} {
+	currentEntry := m.cfg.Current().Entry
+	for _, values := range [][]string{m.secrets, {currentEntry}, extra} {
 		for _, v := range values {
 			if v != "" {
 				s = strings.ReplaceAll(s, v, "[REDACTED]")
@@ -164,6 +166,13 @@ func (l *Log) Line(s string) {
 	l.manager.notify("task:" + l.rowID)
 	l.manager.NotifyCron(l.cronID)
 }
+
+func (m *Manager) SetCompletionHook(hook func(store.Task)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.completed = hook
+}
+
 func (m *Manager) Submit(meta Meta, fn func(context.Context, *Log) (any, error)) (string, error) {
 	m.mu.Lock()
 	if m.closed || m.ctx.Err() != nil {
@@ -247,7 +256,7 @@ func (m *Manager) Submit(meta Meta, fn func(context.Context, *Log) (any, error))
 	}
 	go func() {
 		defer release()
-		log := &Log{file: f, max: m.cfg.TaskLogMaxBytes, manager: m, rowID: id, cronID: meta.CronJobID}
+		log := &Log{file: f, max: m.cfg.Current().TaskLogMaxBytes, manager: m, rowID: id, cronID: meta.CronJobID}
 		var result any
 		var runErr error
 		func() {
@@ -370,6 +379,13 @@ func (m *Manager) Submit(meta Meta, fn func(context.Context, *Log) (any, error))
 		})
 		if e != nil {
 			slog.Error("任务结束状态保存失败", "taskId", id)
+		} else {
+			m.mu.Lock()
+			hook := m.completed
+			m.mu.Unlock()
+			if hook != nil {
+				hook(row)
+			}
 		}
 		m.notify("task:" + id)
 		m.notify("status:" + id)

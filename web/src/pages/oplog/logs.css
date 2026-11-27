@@ -164,3 +164,37 @@
     height: 420px;
   }
 }
+
+/* 运行日志使用内容区剩余高度，滚动留在日志框内。 */
+.logs-page-runtime {
+  display: flex;
+  flex-direction: column;
+  height: var(--panel-content-height, 100dvh);
+  max-height: var(--panel-content-height, 100dvh);
+  min-height: 0;
+  overflow: hidden;
+}
+.logs-page-runtime > .section-tabs-host {
+  flex: none;
+}
+.logs-page-runtime .logs-card,
+.logs-page-runtime .logs-card > .ant-card-body,
+.logs-runtime,
+.logs-output-fill,
+.logs-output-fill > .ant-spin-container {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+}
+.logs-page-runtime .logs-card > .ant-card-body {
+  overflow: auto;
+}
+.logs-output-fill .panel-log-box-host {
+  flex: 1;
+  min-height: 120px;
+}
+.logs-output-fill .logs-output {
+  height: 100%;
+  max-height: 100%;
+}

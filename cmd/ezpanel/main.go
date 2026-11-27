@@ -92,8 +92,11 @@ func run(args []string) error {
 	install := flags.String("install-dir", "/opt/ezpanel", "安装目录")
 	dev := flags.Bool("dev", false, "开发模式，保留认证与来源校验")
 	init := flags.Bool("init", false, "交互初始化后退出")
+	releaseTag := false
 	options := adminOptions{}
 	switch command {
+	case "version":
+		flags.BoolVar(&releaseTag, "tag", false, "显示完整发布标签")
 	case "reset-port":
 		flags.IntVar(&options.port, "port", 0, "新监听端口")
 	case "external-access":
@@ -117,7 +120,11 @@ func run(args []string) error {
 		return errors.New("存在未识别的参数，请运行 ezpanel help")
 	}
 	if command == "version" {
-		fmt.Println(version.Version)
+		if releaseTag {
+			fmt.Println(version.ReleaseTag)
+		} else {
+			fmt.Println(version.Version)
+		}
 		return nil
 	}
 	if !*dev && (runtime.GOOS != "linux" || os.Geteuid() != 0) {
@@ -133,6 +140,9 @@ func run(args []string) error {
 	switch command {
 	case "start", "stop", "restart", "status", "logs":
 		return panelServiceCommand(command, options.follow)
+	}
+	if command == "hardening-recover" {
+		return recoverHardening(*install)
 	}
 	cfg, e := config.Load(*install)
 	if e != nil {
@@ -207,6 +217,9 @@ func run(args []string) error {
 	go packages.Cleanup(ctx)
 	go packages.StartDailyUpdateCheck(ctx)
 	security := securitymodule.New(cfg, a)
+	if e = security.ConfigureHardening(ctx); e != nil {
+		return e
+	}
 	websites, e := website.New(db, cfg, tasks, packages, a, security)
 	if e != nil {
 		return e
@@ -218,18 +231,42 @@ func run(args []string) error {
 	packages.SetDatabasePortSync(security.SyncDatabasePort)
 	router.RegisterModule(applications)
 	go applications.RunClamSchedule(ctx)
+	go applications.RunRsyncSchedule(ctx)
 	databases := database.New(db, cfg, tasks, packages, a)
 	metrics.SetSummarySources(db, databases.CountDatabases)
 	router.RegisterModule(databases)
 	router.RegisterModule(phpmyadmin.New(db, cfg, packages, a))
-	router.RegisterModule(dockermodule.New(db, cfg, tasks, packages, a))
+	docker := dockermodule.New(db, cfg, tasks, packages, a)
+	router.RegisterModule(docker)
 	backups := backupmodule.New(db, cfg, tasks, a, nil)
 	router.RegisterModule(backups)
-	crons, e := cronmodule.New(db, cfg, tasks, databases, a, backups)
+	plugins, e := plugin.New(db, cfg, tasks, a, metrics)
 	if e != nil {
 		return e
 	}
+	backups.SetPluginStorage(plugins)
+	a.SetSSOPlugin(plugins.SSOProvider)
+	a.SetPublicIP(metrics.PublicIP)
+	certificates.SetDNSProviders(plugins)
+	docker.SetDeploymentHooks(plugins.ComposeDeploymentHook)
+	tasks.SetCompletionHook(plugins.PublishTaskEvent)
+	backups.SetSiteBackupFinished(func(siteID, backupID, taskID string, err error) {
+		status := "success"
+		if err != nil {
+			status = "failed"
+		}
+		plugins.PublishEvent(plugin.Event{Name: "site.backup.finished", SiteID: siteID, ResourceID: backupID, TaskID: taskID, Status: status})
+	})
+	certificates.SetRenewalFinished(func(certID, siteID, taskID, status string) {
+		plugins.PublishEvent(plugin.Event{Name: "certificate.renewal.finished", SiteID: siteID, ResourceID: certID, TaskID: taskID, Status: status})
+	})
+	crons, e := cronmodule.New(db, cfg, tasks, databases, a, backups)
+	if e != nil {
+		plugins.Close()
+		return e
+	}
 	defer crons.Close()
+	defer plugins.Close()
 	router.RegisterModule(crons)
 	router.RegisterModule(oplog.New(db, a, cfg, packages, runtimeLog))
 	router.RegisterModule(toolbox.New(db, tasks, a, cfg.InstallDir))
@@ -240,15 +277,20 @@ func run(args []string) error {
 	}
 	defer wafMod.Close()
 	router.RegisterModule(wafMod)
-	plugins, e := plugin.New(db, cfg, tasks, a, metrics)
-	if e != nil {
-		return e
-	}
 	crons.SetBlockedPorts(func() []int { return append(plugins.ManagementPorts(), cfg.Current().Port) })
 	alertModule := alerts.New(db, cfg, packages, plugins.ManagementPorts)
+	alertModule.SetNotificationProviders(plugins)
+	alertModule.SetPluginChecks(plugins)
 	router.RegisterModule(alertModule)
 	router.RegisterModule(plugins)
-	defer plugins.Close()
+	plugins.WebhookRoutes(router.Engine)
+	plugins.FrameRoutes(router.Engine)
+	if e = plugins.Start(plugin.Services{
+		Alerts: alertModule, Backups: backups, Cron: crons, Docker: docker, Database: databases,
+		Websites: websites, Packages: packages, Security: security, WAF: wafMod, Certificates: certificates, Files: files,
+	}); e != nil {
+		return e
+	}
 	entrance := server.NewListener(router)
 	settings, e := settingsmodule.New(db, cfg, a, entrance.Apply, security.RefreshPanelPort)
 	if e != nil {
@@ -275,13 +317,10 @@ func run(args []string) error {
 	case serveErr = <-entrance.Errors:
 	case <-signals.Done():
 	}
-	plugins.Close()
-	crons.Close()
 	cancel()
 	shutdown, finish := context.WithTimeout(context.Background(), 10*time.Second)
 	defer finish()
 	_ = entrance.Close(shutdown)
-	tasks.Close()
 	return serveErr
 }
 func initialize(install string, dev bool) error {

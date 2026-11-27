@@ -14,6 +14,8 @@ import {
   Typography,
 } from 'antd';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import ApplicationInstallGuide from '../../components/ApplicationInstallGuide';
 import {
   saveWebsiteDefaultPage,
   saveWebsiteDefaultSite,
@@ -61,6 +63,7 @@ export default function WebsiteAdvancedModal({
   onClose: () => void;
 }) {
   const { message, modal } = App.useApp();
+  const navigate = useNavigate();
   const client = useQueryClient();
   const screens = Grid.useBreakpoint();
   const [menu, setMenu] = useState('pages');
@@ -301,11 +304,22 @@ export default function WebsiteAdvancedModal({
                 />
                 {cli.isPending ? (
                   <Spin />
-                ) : !cli.data?.installed.length ? (
+                ) : cli.isError ? (
                   <Alert
-                    type="warning"
+                    type="error"
                     showIcon
-                    message="尚未安装任何 PHP 版本，请先在应用商店安装 PHP。"
+                    message={cli.error.message}
+                    action={
+                      <Button onClick={() => void cli.refetch()}>
+                        重新检测
+                      </Button>
+                    }
+                  />
+                ) : !cli.data.installed.length ? (
+                  <ApplicationInstallGuide
+                    name="PHP"
+                    install={() => void navigate('/apps/web')}
+                    onDetect={() => void cli.refetch()}
                   />
                 ) : (
                   <>

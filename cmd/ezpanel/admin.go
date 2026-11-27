@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -52,7 +53,8 @@ var panelCommands = []panelCommand{
 	{"unlock-login", "--ip <address>", "清除指定来源 IP 的登录锁定", true},
 	{"ready", "", "检查面板入口和匿名会话拦截是否就绪", true},
 	{"upgrade-check", "", "检查面板是否有阻止升级的活动任务", true},
-	{"version", "", "查看程序版本", false},
+	{"hardening-recover", "", "关闭系统加固并解除本功能添加的保护，运行中的面板会短暂停止后恢复", true},
+	{"version", "[--tag]", "查看程序版本", false},
 	{"server", "[--init]", "运行面板进程，--init 交互初始化后退出", true},
 }
 
@@ -187,7 +189,7 @@ func resetPanelAccess(command string, old config.Config, options adminOptions) e
 	}
 	active := false
 	for _, line := range strings.Split(string(output), "\n") {
-		if dir, ok := strings.CutPrefix(line, "WorkingDirectory="); ok && dir != "" && dir != old.InstallDir {
+		if dir, ok := strings.CutPrefix(line, "WorkingDirectory="); ok && dir != "" && filepath.Clean(dir) != filepath.Clean(old.InstallDir) {
 			return fmt.Errorf("面板服务使用安装目录 %s，请用 --install-dir 指定", dir)
 		}
 		switch line {

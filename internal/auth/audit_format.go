@@ -220,6 +220,18 @@ func classifyAudit(c *gin.Context, module, method, action, name string) (auditMo
 	if module == "security" {
 		targetID := firstNonEmpty(name, c.Param("id"))
 		switch {
+		case strings.Contains(path, "/hardening"):
+			labels := map[string]string{
+				"enable": "开启系统加固", "disable": "关闭系统加固", "scan": "检查系统加固",
+				"baseline": "更新加固基线", "pause": "临时解除加固保护", "resume": "恢复加固保护",
+			}
+			if label := labels[action]; label != "" {
+				if action == "enable" || action == "disable" || action == "scan" {
+					return "security", label, false
+				}
+				return "security", withBracket(label, targetID), false
+			}
+			return "security", withBracket(defaultVerb(method)+"加固规则", targetID), false
 		case strings.Contains(path, "/firewall"):
 			return "security", withBracket(defaultVerb(method)+"防火墙规则", targetID), false
 		case strings.Contains(path, "/ssh"):
@@ -325,7 +337,7 @@ func isAppConfigRoute(module, path string) bool {
 	for _, seg := range []string{
 		"/settings", "/options", "/port", "/remote-access",
 		"/config", "/extensions", "/php/", "/nginx/",
-		"/ftp/", "/clamav/", "/rsync/", "/supervisor/", "/phpmyadmin/",
+		"/frp/", "/ftp/", "/clamav/", "/rsync/", "/supervisor/", "/phpmyadmin/",
 	} {
 		if strings.Contains(path, seg) {
 			return true
@@ -337,6 +349,26 @@ func isAppConfigRoute(module, path string) bool {
 func formatAppConfigTarget(c *gin.Context, method, path, name string) string {
 	appName := firstNonEmpty(name, c.Param("id"), c.Param("instance"))
 	switch {
+	case strings.Contains(path, "/frp/"):
+		return withBracket(defaultVerb(method)+" Frp 服务配置", firstNonEmpty(name, c.Param("role")))
+	case strings.Contains(path, "/supervisor/"):
+		verb := "保存守护进程配置"
+		if strings.HasSuffix(path, "/log") {
+			verb = "清理守护进程日志"
+			appName = firstNonEmpty(c.Query("name"), "Supervisor")
+		} else if strings.HasSuffix(path, "/action") {
+			switch c.GetString("panel.auditAction") {
+			case "start":
+				verb = "启动守护进程"
+			case "stop":
+				verb = "停止守护进程"
+			case "restart":
+				verb = "重启守护进程"
+			case "delete":
+				verb = "删除守护进程"
+			}
+		}
+		return withBracket(verb, appName)
 	case strings.Contains(path, "/extensions"):
 		ext := firstNonEmpty(c.Param("name"), name)
 		if method == "DELETE" {

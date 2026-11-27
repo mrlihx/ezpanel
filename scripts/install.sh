@@ -412,10 +412,15 @@ automatic_version=false
 reinstall=false
 menu_confirmed=false
 installed_version=
+installed_tag=
 if [[ -d $install/data ]]; then
   [[ -f $install/data/config.yaml && -f $install/data/panel.db ]] || fail '发现不完整旧数据，禁止重新初始化；请先恢复完整备份'
   if [[ -x $binary && -f $unit ]]; then
     installed_version=$("$binary" version 2>/dev/null || true)
+    installed_tag=$("$binary" version --tag 2>/dev/null || true)
+    if [[ ! $installed_tag =~ $version_pattern && v$installed_version =~ $version_pattern ]]; then
+      installed_tag=v$installed_version
+    fi
   fi
 fi
 
@@ -446,10 +451,10 @@ if [[ $explicit_action == false ]] && can_interact; then
   if [[ -z $installed_version ]]; then
     printf '  %-10s : %s未安装%s\n' "当前版本" "$C_DIM" "$C_RESET"
   elif [[ -n $latest_version ]]; then
-    if [[ $installed_version == "$latest_version" ]]; then
+    if [[ $installed_tag == "$latest_tag" ]]; then
       is_latest=true
       printf '  %-10s : %s%s%s  %s(已是最新)%s\n' "当前版本" "$C_GREEN" "$installed_version" "$C_RESET" "$C_DIM" "$C_RESET"
-    elif [[ v$installed_version =~ $version_pattern && $(printf '%s\n' "$installed_version" "$latest_version" | sort -V | tail -n 1) == "$latest_version" ]]; then
+    elif [[ $installed_tag =~ $version_pattern && $(printf '%s\n' "$installed_tag" "$latest_tag" | sort -V | tail -n 1) == "$latest_tag" ]]; then
       has_update=true
       printf '  %-10s : %s%s%s\n' "当前版本" "$C_YELLOW" "$installed_version" "$C_RESET"
     else
@@ -488,7 +493,7 @@ if [[ $explicit_action == false ]] && can_interact; then
     esac
   elif [[ $has_update == true ]]; then
     printf '  %s请选择要执行的操作：%s\n' "$C_BOLD" "$C_RESET"
-    printf '    %s[1]%s 更新 EzPanel (%s -> %s)\n' "$C_GREEN" "$C_RESET" "$installed_version" "$latest_version"
+    printf '    %s[1]%s 更新 EzPanel (%s -> %s)\n' "$C_GREEN" "$C_RESET" "${installed_tag#v}" "${latest_tag#v}"
     printf '    %s[9]%s 卸载 EzPanel\n' "$C_RED" "$C_RESET"
     printf '    %s[0]%s 退出\n\n' "$C_DIM" "$C_RESET"
     printf '  请输入选项 [%s1%s]: ' "$C_CYAN" "$C_RESET"
@@ -522,12 +527,12 @@ if [[ $official == true ]]; then
   release_version=${version#v}
   release_version=${release_version%%-r*}
   if [[ $menu_confirmed == false && $action == install && -n $installed_version ]]; then
-    if [[ $installed_version == "$release_version" ]]; then
+    if [[ $installed_tag == "$version" ]]; then
       printf '当前版本已是 %s。重装只替换程序，保留配置及数据。\n' "$installed_version"
       printf '输入 REINSTALL 确认重装，直接回车退出：'
       if ! prompt_read answer || [[ $answer != REINSTALL ]]; then exit 0; fi
       reinstall=true
-    elif [[ $automatic_version == true && v$installed_version =~ $version_pattern && $(printf '%s\n' "$installed_version" "$release_version" | sort -V | tail -n 1) == "$installed_version" ]]; then
+    elif [[ $automatic_version == true && $installed_tag =~ $version_pattern && $(printf '%s\n' "$installed_tag" "$version" | sort -V | tail -n 1) == "$installed_tag" ]]; then
       printf '当前版本 %s 高于可用版本 %s，保留已安装程序。\n' "$installed_version" "$release_version"
       exit 0
     fi
@@ -586,8 +591,10 @@ actual=$(sha256sum "$work/$artifact"); actual=${actual%% *}
 ui_ok "二进制校验通过 (SHA-256)"
 chmod 755 "$work/$artifact"
 artifact_version=$("$work/$artifact" version)
-if [[ $official == true && $artifact_version != "$release_version" ]]; then
-  fail '二进制版本与发布标签不一致，未替换面板'
+if [[ $official == true ]]; then
+  [[ $artifact_version == "$release_version" ]] || fail '二进制版本与发布标签不一致，未替换面板'
+  artifact_tag=$("$work/$artifact" version --tag 2>/dev/null || true)
+  [[ -z $artifact_tag || $artifact_tag == "$version" ]] || fail '二进制修订号与发布标签不一致，未替换面板'
 fi
 ui_ok "程序版本校验通过 ($artifact_version)"
 

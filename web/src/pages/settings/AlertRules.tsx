@@ -35,6 +35,7 @@ const kinds = {
   service: '服务异常',
   project: '项目异常',
   certificate: '证书到期',
+  plugin: '插件检测',
 };
 const kindOptions = Object.entries(kinds).map(([value, label]) => ({
   value,

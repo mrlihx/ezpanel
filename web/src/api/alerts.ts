@@ -2,12 +2,18 @@ import { request } from './client';
 
 const alerts = '/api/settings/alerts';
 
-export type AlertChannelKind = 'email' | 'webhook';
+export type AlertChannelKind = 'email' | 'webhook' | `plugin:${string}`;
 
-export const alertChannelNames: Record<AlertChannelKind, string> = {
+export const alertChannelNames = {
   email: '邮箱',
   webhook: 'Webhook',
 };
+
+export function alertChannelName(kind: AlertChannelKind) {
+  return kind === 'email' || kind === 'webhook'
+    ? alertChannelNames[kind]
+    : kind.slice(7);
+}
 
 export type AlertChannelInput = {
   kind: AlertChannelKind;
@@ -28,6 +34,7 @@ export type AlertChannelInput = {
   verifyTLS?: boolean;
   params?: string;
   headers?: string;
+  target?: string;
 };
 
 export type AlertChannel = Omit<
@@ -41,7 +48,7 @@ export type AlertChannel = Omit<
   hasHeaders?: boolean;
 };
 
-export type AlertRuleKind = 'service' | 'project' | 'certificate';
+export type AlertRuleKind = 'service' | 'project' | 'certificate' | 'plugin';
 
 export type AlertRuleInput = {
   title: string;

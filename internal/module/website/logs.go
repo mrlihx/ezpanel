@@ -15,6 +15,7 @@ import (
 
 	"ezpanel/internal/eventstream"
 	"ezpanel/internal/response"
+	"ezpanel/internal/store"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sys/unix"
 )
@@ -252,6 +253,10 @@ func (m *Module) logFilter(c *gin.Context) (func(string) bool, bool) {
 		return nil, false
 	}
 	keyword := c.Query("keyword")
+	return m.logMatcher(keyword, start, end), true
+}
+
+func (m *Module) logMatcher(keyword string, start, end time.Time) func(string) bool {
 	location, err := time.LoadLocation(m.cfg.Current().Timezone)
 	if err != nil {
 		location = time.UTC
@@ -273,5 +278,17 @@ func (m *Module) logFilter(c *gin.Context) (func(string) bool, bool) {
 			stamp, _ = time.ParseInLocation("2006/01/02 15:04:05", line[:19], location)
 		}
 		return !stamp.IsZero() && (start.IsZero() || !stamp.Before(start)) && (end.IsZero() || !stamp.After(end))
-	}, true
+	}
+}
+
+func (m *Module) PluginLogTail(ctx context.Context, id, kind, keyword string, lines int, start, end time.Time) (string, bool, error) {
+	var site store.Website
+	if err := m.db.WithContext(ctx).First(&site, "id = ?", id).Error; err != nil {
+		return "", false, err
+	}
+	out, err := readLogTail(siteLogPath(siteLogDirectory(site), kind), lines, m.logMatcher(keyword, start, end))
+	if err != nil {
+		return "", false, err
+	}
+	return out["content"].(string), out["truncated"].(bool), nil
 }

@@ -17,10 +17,27 @@ import {
   Typography,
   theme,
 } from 'antd';
-import ReactECharts from 'echarts-for-react';
+import * as echarts from 'echarts/core';
+import { LineChart, PieChart } from 'echarts/charts';
+import {
+  GridComponent,
+  LegendComponent,
+  TooltipComponent,
+} from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
+import ReactECharts from 'echarts-for-react/esm/core';
 import dayjs from 'dayjs';
 import { createWAFBan, getWAFOverview, syncWAFEngine } from '../../api/waf';
 import { CHART_COLORS, LAYOUT, MONO_FONT, SPACING } from '../../styles/tokens';
+
+echarts.use([
+  LineChart,
+  PieChart,
+  GridComponent,
+  LegendComponent,
+  TooltipComponent,
+  CanvasRenderer,
+]);
 
 export default function Overview() {
   const { message } = App.useApp();

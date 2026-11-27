@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
@@ -19,6 +20,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -45,12 +47,20 @@ type Session struct {
 	ExpiresAt time.Time
 }
 type Service struct {
-	db      *gorm.DB
-	cfg     config.Config
-	key     []byte
-	proxies []*net.IPNet
-	now     func() time.Time
+	db           *gorm.DB
+	cfg          config.Config
+	key          []byte
+	proxies      []*net.IPNet
+	now          func() time.Time
+	ssoPlugin    func(string) (title string, available bool)
+	publicIP     func(context.Context) string
+	policyMu     sync.RWMutex
+	policyLoaded bool
+	policyCache  SecurityPolicy
 }
+
+func (s *Service) SetPublicIP(fn func(context.Context) string) { s.publicIP = fn }
+func (s *Service) CurrentConfig() config.Config               { return s.cfg.Current() }
 
 func New(db *gorm.DB, cfg config.Config) (*Service, error) {
 	key, e := base64.StdEncoding.DecodeString(cfg.JWTSecret)
@@ -92,9 +102,12 @@ func ValidatePassword(p string) error {
 	}
 	return nil
 }
+
+const sessionLifetime = 30 * 24 * time.Hour
+
 func (s *Service) claims(u store.User) Claims {
 	now := s.now()
-	return Claims{RegisteredClaims: jwt.RegisteredClaims{ID: store.ID(), Subject: strconv.FormatUint(uint64(u.ID), 10), Issuer: "ezpanel", Audience: jwt.ClaimStrings{"panel-session"}, IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(12 * time.Hour))}, AuthVersion: u.AuthVersion, Purpose: "session"}
+	return Claims{RegisteredClaims: jwt.RegisteredClaims{ID: store.ID(), Subject: strconv.FormatUint(uint64(u.ID), 10), Issuer: "ezpanel", Audience: jwt.ClaimStrings{"panel-session"}, IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(sessionLifetime))}, AuthVersion: u.AuthVersion, Purpose: "session"}
 }
 func (s *Service) Issue(u store.User) (string, error) {
 	claims := s.claims(u)
@@ -164,9 +177,43 @@ func (s *Service) entryMAC(value string) string {
 	h.Write([]byte("panel-entry:" + value))
 	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 }
+
+const PluginWebhookPath = "/plugin-webhooks/:id/:job"
+const PluginFramePath = "/plugin-frame/:id/:version/:expires/:signature/*asset"
+
+// 隔离页的只读资源使用独立签名和匿名 CORS，面板 API 仍要求正常认证。
+func PluginFrameAssetRequest(c *gin.Context) bool {
+	if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+		return false
+	}
+	if c.FullPath() == PluginFramePath {
+		return true
+	}
+	p := c.Request.URL.Path
+	return c.GetHeader("Origin") == "null" && (strings.HasPrefix(p, "/assets/") || strings.HasPrefix(p, "/shared/v1/"))
+}
+
 func (s *Service) EntryGuard() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Referrer-Policy", "no-referrer")
+		if PluginFrameAssetRequest(c) {
+			c.Next()
+			return
+		}
+		// 此精确路由由插件模块校验签名；面板会话、API 和来源校验仍走原入口。
+		if c.FullPath() == PluginWebhookPath && c.Request.Method == http.MethodPost {
+			c.Next()
+			return
+		}
+		if c.FullPath() == ssoCallbackPath && c.Request.Method == http.MethodGet {
+			c.Next()
+			return
+		}
+		policy := s.SecurityPolicy()
+		if policy.UserAgentEnabled && policy.UserAgentAllow != "" && !matchesUserAgent(c.Request.UserAgent(), policy.UserAgentAllow) {
+			s.abortUnauthenticated(c, policy)
+			return
+		}
 		if s.requestSession(c).Token != "" {
 			c.Next()
 			return
@@ -185,7 +232,7 @@ func (s *Service) EntryGuard() gin.HandlerFunc {
 		c.Header("Cache-Control", "no-store")
 		if c.Request.Method == http.MethodGet && c.Request.URL.Path == "/"+cfg.Entry {
 			if cfg.DirectIPAccess() && directRequestOrigin(cfg, c.Request) == nil {
-				c.AbortWithStatus(http.StatusNotFound)
+				s.abortUnauthenticated(c, policy)
 				return
 			}
 			v := cfg.Entry + "." + strconv.FormatInt(s.now().Add(12*time.Hour).Unix(), 10)
@@ -194,7 +241,7 @@ func (s *Service) EntryGuard() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		c.AbortWithStatus(http.StatusNotFound)
+		s.abortUnauthenticated(c, policy)
 	}
 }
 func (s *Service) trusted(remote string) bool {
@@ -293,7 +340,9 @@ func (s *Service) SourceGuard() gin.HandlerFunc {
 		unsafe := c.Request.Method != "GET" && c.Request.Method != "HEAD" && c.Request.Method != "OPTIONS"
 		// phpMyAdmin使用标准HTML表单；仍要求已认证且浏览器明确来自同源。
 		pmaForm := strings.HasPrefix(c.Request.URL.Path, "/api/phpmyadmin/view/") && origin == allowed
-		if (origin != "" && origin != allowed && !devOrigin) || (ws && origin == "") || (unsafe && c.GetHeader("X-Panel-Request") != "1" && !pmaForm) {
+		frameAsset := origin == "null" && PluginFrameAssetRequest(c)
+		pluginWebhook := c.FullPath() == PluginWebhookPath && c.Request.Method == http.MethodPost
+		if (origin != "" && origin != allowed && !devOrigin && !frameAsset && !pluginWebhook) || (ws && origin == "") || (unsafe && c.GetHeader("X-Panel-Request") != "1" && !pmaForm && !pluginWebhook) {
 			response.Fail(c, 1003, "请求来源不被允许")
 			return
 		}
@@ -302,6 +351,18 @@ func (s *Service) SourceGuard() gin.HandlerFunc {
 	}
 }
 func (s *Service) ConfirmPassword(ip string, u store.User, password string) error {
+	if err := s.checkPassword(ip, u, password); err != nil {
+		return err
+	}
+	return s.clearLoginFailures(ip)
+}
+
+var dummyPasswordHash = func() []byte {
+	h, _ := bcrypt.GenerateFromPassword([]byte("ezpanel-dummy-password"), bcrypt.DefaultCost)
+	return h
+}()
+
+func (s *Service) checkPassword(ip string, u store.User, password string) error {
 	var attempt store.LoginAttempt
 	if err := s.db.Take(&attempt, "ip = ?", ip).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
@@ -309,25 +370,38 @@ func (s *Service) ConfirmPassword(ip string, u store.User, password string) erro
 	if attempt.Count >= passwordAttemptLimit && attempt.ExpiresAt > s.now().Unix() {
 		return ErrLocked
 	}
-	invalid := len(password) > 72 || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) != nil
-	now := s.now()
-	if invalid {
-		if err := s.db.Where("expires_at <= ?", now.Unix()).Delete(&store.LoginAttempt{}).Error; err != nil {
-			return err
-		}
-		// 到达上限后固定解锁时间，并发失败请求也不会延长锁定。
-		var count int
-		err := s.db.Raw(`INSERT INTO login_attempts (ip, count, expires_at) VALUES (?, 1, ?)
-			ON CONFLICT(ip) DO UPDATE SET count = count + 1, expires_at = excluded.expires_at
-			WHERE count < ? RETURNING count`, ip, now.Add(passwordLockDuration).Unix(), passwordAttemptLimit).Row().Scan(&count)
-		if errors.Is(err, sql.ErrNoRows) || count >= passwordAttemptLimit {
-			return ErrLocked
-		}
-		if err != nil {
-			return err
-		}
-		return ErrCredentials
+	hash := []byte(u.PasswordHash)
+	if len(hash) == 0 {
+		hash = dummyPasswordHash
 	}
+	if len(password) > 72 || bcrypt.CompareHashAndPassword(hash, []byte(password)) != nil || len(u.PasswordHash) == 0 {
+		return s.recordLoginFailure(ip)
+	}
+	return nil
+}
+
+func (s *Service) recordLoginFailure(ip string) error {
+	now := s.now()
+	if err := s.db.Where("expires_at <= ?", now.Unix()).Delete(&store.LoginAttempt{}).Error; err != nil {
+		return err
+	}
+	// 到达上限后固定解锁时间，并发失败请求也不会延长锁定。
+	var count int
+	err := s.db.Raw(`INSERT INTO login_attempts (ip, count, expires_at) VALUES (?, 1, ?)
+		ON CONFLICT(ip) DO UPDATE SET count = count + 1, expires_at = excluded.expires_at
+		WHERE count < ? RETURNING count`, ip, now.Add(passwordLockDuration).Unix(), passwordAttemptLimit).Row().Scan(&count)
+	if errors.Is(err, sql.ErrNoRows) || count >= passwordAttemptLimit {
+		return ErrLocked
+	}
+	if err != nil {
+		return err
+	}
+	return ErrCredentials
+}
+
+func (s *Service) clearLoginFailures(ip string) error {
+	now := s.now()
+	var attempt store.LoginAttempt
 	result := s.db.Where("ip = ? AND (count < ? OR expires_at <= ?)", ip, passwordAttemptLimit, now.Unix()).Delete(&store.LoginAttempt{})
 	if result.Error != nil {
 		return result.Error
@@ -350,8 +424,16 @@ func (s *Service) audit(c *gin.Context, action string, success bool, code int) {
 }
 func (s *Service) Routes(g *gin.RouterGroup) {
 	g.POST("/api/auth/login", s.login)
-	g.GET("/api/auth/branding", func(c *gin.Context) { response.OK(c, gin.H{"alias": s.cfg.Current().Alias}) })
+	g.GET("/api/auth/branding", s.branding)
+	g.GET(ssoPath+"start", s.startSSO)
+	g.GET(ssoCallbackPath, s.finishSSO)
 	secured := g.Group("")
+	secured.GET("/api/auth/sso/config", s.getSSOConfig)
+	secured.PUT("/api/auth/sso/config", s.saveSSOConfig)
+	secured.GET("/api/auth/totp", s.getTOTPStatus)
+	secured.POST("/api/auth/totp/setup", s.setupTOTP)
+	secured.POST("/api/auth/totp/enable", s.enableTOTP)
+	secured.POST("/api/auth/totp/disable", s.disableTOTP)
 	secured.GET("/api/auth/me", func(c *gin.Context) {
 		response.OK(c, s.userInfo(Current(c).User))
 	})
@@ -363,6 +445,7 @@ func (s *Service) login(c *gin.Context) {
 	var p struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		TotpCode string `json:"totpCode"`
 	}
 	if !response.Bind(c, &p) {
 		code := 1001
@@ -378,7 +461,8 @@ func (s *Service) login(c *gin.Context) {
 		response.Fail(c, 5000, "")
 		return
 	}
-	e := s.ConfirmPassword(s.ClientIP(c), u, p.Password)
+	ip := s.ClientIP(c)
+	e := s.checkPassword(ip, u, p.Password)
 	if e != nil {
 		code, message := response.Internal, ""
 		switch {
@@ -393,13 +477,42 @@ func (s *Service) login(c *gin.Context) {
 		response.Fail(c, code, message)
 		return
 	}
+	if cfg, err := s.totpSettings(c.Request.Context()); err != nil {
+		s.audit(c, "login", false, 5000)
+		response.Fail(c, 5000, "")
+		return
+	} else if cfg.Enabled && cfg.UserID == u.ID {
+		valid, err := s.consumeTOTP(c.Request.Context(), cfg, p.TotpCode)
+		if err == nil && !valid {
+			err = s.recordLoginFailure(ip)
+		}
+		if err != nil {
+			code, message := response.Internal, ""
+			if errors.Is(err, ErrLocked) {
+				code, message = response.Forbidden, err.Error()
+			} else if errors.Is(err, ErrCredentials) {
+				code, message = response.Unauthorized, "动态口令验证码错误或已使用，请等待新口令"
+			}
+			s.audit(c, "login-totp", false, code)
+			response.Fail(c, code, message)
+			return
+		}
+	}
+	if err := s.clearLoginFailures(ip); err != nil {
+		if errors.Is(err, ErrLocked) {
+			response.Fail(c, response.Forbidden, err.Error())
+		} else {
+			response.Fail(c, response.Internal, "")
+		}
+		return
+	}
 	raw, e := s.Issue(u)
 	if e != nil {
 		response.Fail(c, 5000, "")
 		return
 	}
 	c.Set("panel.session", Session{User: u})
-	s.cookie(c, "panel_token", raw, 43200)
+	s.cookie(c, "panel_token", raw, int(sessionLifetime/time.Second))
 	s.cookie(c, "panel_entry", "", -1)
 	s.audit(c, "login", true, 0)
 	response.OK(c, s.userInfo(u))
@@ -434,7 +547,12 @@ func (s *Service) password(c *gin.Context) {
 	}
 	h, e := bcrypt.GenerateFromPassword([]byte(p.NewPassword), bcrypt.DefaultCost)
 	if e == nil {
-		e = s.db.Model(&u).Updates(map[string]any{"password_hash": string(h), "auth_version": gorm.Expr("auth_version + 1")}).Error
+		e = s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&u).Updates(map[string]any{"password_hash": string(h), "auth_version": gorm.Expr("auth_version + 1")}).Error; err != nil {
+				return err
+			}
+			return tx.Where("user_id = ?", u.ID).Delete(&store.AuthSession{}).Error
+		})
 	}
 	if e != nil {
 		response.Fail(c, 5000, "")

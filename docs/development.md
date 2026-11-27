@@ -35,8 +35,8 @@ EzPanel 提供完整的 Go 与 TypeScript 插件 SDK 以及示例工程，支持
 
 - 插件开发规范与接口文档：[docs/plugin-dev.md](plugin-dev.md)
 - 插件 SDK 目录：[sdk/](../sdk/)
-- 示例插件：[examples/hello-plugin/](../examples/hello-plugin/)
-- 插件打包脚本：`scripts/pack-plugin.sh`
+- 示例插件：[examples/ezpanel-demo-plugin/](../examples/ezpanel-demo-plugin/)
+- 插件打包脚本：`scripts/build-plugin.sh`、`scripts/pack-plugin.sh`
 
 ---
 
@@ -90,7 +90,7 @@ flowchart TB
 ```text
 .
 ├── cmd/
-│   ├── ezpanel/          # 面板主服务与 CLI（server / info / ready / version / reset-password / upgrade-check）
+│   ├── ezpanel/          # 面板主服务与 CLI（server / info / ready / version / reset-password / upgrade-check / hardening-recover）
 │   └── plugin-pack/      # 插件打包 CLI 工具
 ├── internal/
 │   ├── auth/             # 会话认证、安全入口、Origin/SourceGuard 与操作审计
@@ -98,6 +98,7 @@ flowchart TB
 │   ├── eventstream/      # SSE 事件流封装
 │   ├── executor/         # 受控宿主机命令执行器
 │   ├── geoip/            # 离线 IPv4/IPv6 归属地查询与自动更新
+│   ├── hardening/        # 系统加固与目录守护
 │   ├── logview/          # 日志读取与分页检索
 │   ├── pathsafe/         # 文件路径安全边界校验
 │   ├── pkgmgr/           # Docker 容器应用、数据库多实例、安全升级与宿主机工具管理
@@ -106,12 +107,13 @@ flowchart TB
 │   ├── server/           # HTTP/TLS 监听与模块路由注册
 │   ├── store/            # SQLite Schema、GORM 模型、AES-GCM 加密、JSONL 操作日志存储
 │   ├── task/             # 异步任务队列、资源锁与实时日志
+│   ├── version/          # 构建版本与发布标签信息
 │   └── module/           # 业务模块（alerts / backup / certificate / cron / database / docker / file / oplog / phpmyadmin / security / settings / software / sysinfo / terminal / toolbox / waf / website）
 ├── web/                  # 前端工程（构建产物 web/dist 通过 go:embed 嵌入后端）
 ├── sdk/                  # 插件开发 SDK（Go 与 TypeScript）
-├── examples/             # 示例插件（hello-plugin）
+├── examples/             # 示例插件（ezpanel-demo-plugin）
 ├── scripts/              # 安装 / 升级 / 回滚 / 卸载与插件打包脚本
-├── docs/                 # 开发文档（plugin-dev.md）
+├── docs/                 # 开发文档（development.md / operations.md / plugin-dev.md）
 ├── Makefile              # 构建、开发、检查与测试入口
 └── LICENSE               # GNU GPL-3.0 开源协议
 ```

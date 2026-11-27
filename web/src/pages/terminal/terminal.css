@@ -247,17 +247,4 @@
   .terminal-page {
     gap: 12px;
   }
-
-  .terminal-launcher-card {
-    padding: 16px;
-    gap: 14px;
-  }
-
-  .terminal-launcher-search {
-    max-width: 100%;
-  }
-
-  .terminal-launcher-grid {
-    grid-template-columns: 1fr;
-  }
 }

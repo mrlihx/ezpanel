@@ -17,7 +17,7 @@ import {
 } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  alertChannelNames,
+  alertChannelName,
   alertChannels,
   deleteAlertChannel,
   saveAlertChannel,
@@ -26,12 +26,14 @@ import {
   type AlertChannelInput,
   type AlertChannelKind,
 } from '../../api/alerts';
+import { usePluginList } from '../../api/plugin';
 import ApplicationSettingsForm from '../../components/ApplicationSettingsForm';
 import ContentSizedTable from '../../components/ContentSizedTable';
 import { LAYOUT, SPACING } from '../../styles/tokens';
 
 function AlertChannelEditor({
   kind,
+  label,
   channel,
   defaultChannel,
   saving,
@@ -39,6 +41,7 @@ function AlertChannelEditor({
   onSave,
 }: {
   kind: AlertChannelKind;
+  label: string;
   channel?: AlertChannel;
   defaultChannel: boolean;
   saving: boolean;
@@ -48,7 +51,6 @@ function AlertChannelEditor({
   const [form] = Form.useForm<AlertChannelInput>();
   const method = Form.useWatch('method', form) ?? channel?.method ?? 'POST';
   const clearPassword = Form.useWatch('clearPassword', form);
-  const label = alertChannelNames[kind];
   return (
     <Modal
       title={`${channel ? '修改' : '添加'}${label}配置`}
@@ -159,7 +161,7 @@ function AlertChannelEditor({
               />
             </Form.Item>
           </>
-        ) : (
+        ) : kind === 'webhook' ? (
           <>
             <Form.Item
               name="url"
@@ -235,6 +237,10 @@ function AlertChannelEditor({
               <Switch />
             </Form.Item>
           </>
+        ) : (
+          <Form.Item name="target" label="通知目标">
+            <Input maxLength={256} placeholder="填写插件要求的接收人或群组" />
+          </Form.Item>
         )}
         <Form.Item name="enabled" label="启用配置" valuePropName="checked">
           <Switch />
@@ -258,6 +264,7 @@ export default function AlertChannels() {
     queryKey: ['settings-alerts', 'channels'],
     queryFn: alertChannels,
   });
+  const plugins = usePluginList(true);
   const refresh = () =>
     client.invalidateQueries({ queryKey: ['settings-alerts', 'channels'] });
   const save = useMutation({
@@ -278,6 +285,28 @@ export default function AlertChannels() {
     },
   });
   const list = channels.data?.list ?? [];
+  const groups = new Map<
+    AlertChannelKind,
+    { label: string; available: boolean }
+  >([
+    ['email', { label: alertChannelName('email'), available: true }],
+    ['webhook', { label: alertChannelName('webhook'), available: true }],
+  ]);
+  for (const plugin of plugins.data ?? []) {
+    if (plugin.notificationProvider) {
+      groups.set(`plugin:${plugin.id}`, {
+        label: plugin.notificationProvider.title,
+        available: plugin.runtimeStatus === 'running',
+      });
+    }
+  }
+  for (const row of list) {
+    if (!groups.has(row.kind))
+      groups.set(row.kind, {
+        label: alertChannelName(row.kind),
+        available: false,
+      });
+  }
   return (
     <Flex vertical gap={SPACING.xl}>
       {channels.error && (
@@ -292,9 +321,9 @@ export default function AlertChannels() {
           }
         />
       )}
-      {(['email', 'webhook'] as const).map((kind) => {
-        const label = alertChannelNames[kind];
+      {[...groups].map(([kind, { label, available }]) => {
         const rows = list.filter((channel) => channel.kind === kind);
+        if (!available && !rows.length) return null;
         return (
           <Flex key={kind} vertical gap={SPACING.md}>
             <Flex align="center" gap={SPACING.md} justify="space-between" wrap>
@@ -303,7 +332,7 @@ export default function AlertChannels() {
               </Typography.Title>
               <Button
                 type="primary"
-                disabled={!channels.data}
+                disabled={!channels.data || !available}
                 onClick={() => setEditing({ kind })}
               >
                 添加{label}配置
@@ -334,10 +363,15 @@ export default function AlertChannels() {
                       key: 'server',
                       render: (_, row) => `${row.smtpHost}:${row.smtpPort}`,
                     }
-                  : {
-                      title: '请求方法',
-                      dataIndex: 'method',
-                    },
+                  : kind === 'webhook'
+                    ? {
+                        title: '请求方法',
+                        dataIndex: 'method',
+                      }
+                    : {
+                        title: '通知目标',
+                        dataIndex: 'target',
+                      },
                 {
                   title: '状态',
                   dataIndex: 'enabled',
@@ -398,6 +432,9 @@ export default function AlertChannels() {
       {editing && (
         <AlertChannelEditor
           {...editing}
+          label={
+            groups.get(editing.kind)?.label ?? alertChannelName(editing.kind)
+          }
           defaultChannel={
             !list.some(
               (channel) => channel.kind === editing.kind && channel.isDefault,

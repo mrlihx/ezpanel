@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -53,6 +55,55 @@ func TestPanelEntryFormat(t *testing.T) {
 		cfg.Entry = entry
 		if Validate(cfg) == nil {
 			t.Errorf("entry %q accepted", entry)
+		}
+	}
+}
+
+func TestIdleTimeoutHours(t *testing.T) {
+	cfg, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.IdleMinutes != 60 {
+		t.Fatal("默认应为1小时", cfg.IdleMinutes)
+	}
+	for _, minutes := range []int{60, 120, 168 * 60} {
+		cfg.IdleMinutes = minutes
+		if err := Validate(cfg); err != nil {
+			t.Errorf("%d rejected: %v", minutes, err)
+		}
+	}
+	for _, minutes := range []int{0, 1, 30, 59, 61, 168*60 + 60} {
+		cfg.IdleMinutes = minutes
+		if Validate(cfg) == nil {
+			t.Errorf("%d accepted", minutes)
+		}
+	}
+}
+func TestLegacyIdleTimeoutRoundsUp(t *testing.T) {
+	for _, sample := range []struct{ old, want int }{{1, 60}, {30, 60}, {60, 60}, {90, 120}, {720, 720}} {
+		cfg, err := New(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = Save(cfg); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(cfg.DataDir(), "config.yaml")
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := strings.Replace(string(raw), "idleMinutes: 60", fmt.Sprintf("idleMinutes: %d", sample.old), 1)
+		if err = os.WriteFile(path, []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := Load(cfg.InstallDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if loaded.IdleMinutes != sample.want {
+			t.Errorf("%d -> %d, want %d", sample.old, loaded.IdleMinutes, sample.want)
 		}
 	}
 }

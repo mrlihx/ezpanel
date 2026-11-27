@@ -90,7 +90,6 @@ func (p *Plugin) RunContext(ctx context.Context) error {
 			server.Close()
 		}
 		<-done
-		p.Host.client.CloseIdleConnections()
 		return e
 	}
 }

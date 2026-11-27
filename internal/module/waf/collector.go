@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -106,12 +107,13 @@ func (m *Module) collectOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	var collectErr error
 	for _, path := range rotated {
 		if err := m.collectFile(ctx, path); err != nil {
-			return err
+			collectErr = errors.Join(collectErr, fmt.Errorf("采集 %s：%w", filepath.Base(path), err))
 		}
 	}
-	return m.collectFile(ctx, eventLog)
+	return errors.Join(collectErr, m.collectFile(ctx, eventLog))
 }
 
 func (m *Module) collectFile(ctx context.Context, path string) error {

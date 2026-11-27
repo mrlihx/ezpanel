@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"time"
 
+	"ezpanel/internal/auth"
 	"ezpanel/internal/config"
 )
 
@@ -61,6 +62,18 @@ func upgradeCheck(cfg config.Config) error {
 
 // readyCheck 验证真实入口和匿名会话拒绝，不创建登录会话、不执行数据库迁移。
 func readyCheck(cfg config.Config) error {
+	db, e := openPanelDatabase(cfg, "ro")
+	if e != nil {
+		return fmt.Errorf("就绪检查无法打开面板数据库：%w", e)
+	}
+	defer db.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	policy, e := auth.ReadSecurityPolicy(ctx, db)
+	if e != nil {
+		return fmt.Errorf("就绪检查无法读取安全访问策略：%w", e)
+	}
+	userAgent := policy.ProbeUserAgent()
 	host := cfg.LocalListenHost()
 	scheme := "http"
 	transport := &http.Transport{Proxy: nil}
@@ -90,6 +103,7 @@ func readyCheck(cfg config.Config) error {
 	if e != nil {
 		return e
 	}
+	entry.Header.Set("User-Agent", userAgent)
 	res, e := client.Do(entry)
 	if e != nil {
 		return errors.New("面板入口尚未就绪")
@@ -104,6 +118,7 @@ func readyCheck(cfg config.Config) error {
 	if e != nil {
 		return e
 	}
+	req.Header.Set("User-Agent", userAgent)
 	for _, cookie := range cookies {
 		req.AddCookie(cookie)
 	}

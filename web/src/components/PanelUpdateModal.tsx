@@ -33,6 +33,7 @@ export default function PanelUpdateModal({
   const [restarting, setRestarting] = useState(false);
   const [updateError, setUpdateError] = useState('');
   const pollRef = useRef<number | null>(null);
+  const pollInFlightRef = useRef(false);
 
   const statusQuery = useQuery({
     queryKey: ['panel-status'],
@@ -42,13 +43,19 @@ export default function PanelUpdateModal({
   });
 
   useEffect(() => {
+    if (!open && pollRef.current !== null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+      pollInFlightRef.current = false;
+    }
     return () => {
       if (pollRef.current !== null) {
         window.clearInterval(pollRef.current);
         pollRef.current = null;
+        pollInFlightRef.current = false;
       }
     };
-  }, []);
+  }, [open]);
 
   const data = statusQuery.data;
 
@@ -69,21 +76,33 @@ export default function PanelUpdateModal({
     }
   }
 
-  function startPollAfterRestart(expectedVersion: string) {
+  function startPollAfterRestart(expectedVersion: string, expectedTag: string) {
+    if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    pollInFlightRef.current = false;
     setRestarting(true);
     let attempts = 0;
-    let sawOffline = false;
     pollRef.current = window.setInterval(async () => {
+      if (pollInFlightRef.current) return;
       attempts++;
+      if (attempts > 35) {
+        if (pollRef.current !== null) window.clearInterval(pollRef.current);
+        pollRef.current = null;
+        setRestarting(false);
+        setUpdating(false);
+        setUpdateError('等待面板确认新版本超时，请刷新页面查看当前版本');
+        return;
+      }
+      pollInFlightRef.current = true;
       try {
         const res = await fetch('/api/sysinfo/panel-status', {
           credentials: 'same-origin',
           cache: 'no-store',
+          headers: { 'X-Panel-Request': '1' },
         });
-        if (!res.ok) {
-          sawOffline = true;
-          return;
-        }
+        if (!res.ok) return;
         const payload = (await res.json()) as {
           code?: number;
           data?: PanelStatus;
@@ -102,9 +121,10 @@ export default function PanelUpdateModal({
           return;
         }
         if (
-          latest.panelVersion === expectedVersion ||
-          (sawOffline && attempts >= 3) ||
-          attempts >= 20
+          latest.currentTag
+            ? latest.currentTag === expectedTag
+            : !expectedTag.includes('-r') &&
+              latest.panelVersion === expectedVersion
         ) {
           if (pollRef.current !== null) {
             window.clearInterval(pollRef.current);
@@ -113,23 +133,14 @@ export default function PanelUpdateModal({
           setRestarting(false);
           setUpdating(false);
           void message.success(
-            `面板已更新至 v${latest.panelVersion}，即将刷新页面`,
+            `面板已更新至 ${latest.currentTag || `v${latest.panelVersion}`}，即将刷新页面`,
           );
           window.setTimeout(() => window.location.reload(), 800);
         }
       } catch {
-        sawOffline = true;
-        if (attempts >= 35) {
-          if (pollRef.current !== null) {
-            window.clearInterval(pollRef.current);
-            pollRef.current = null;
-          }
-          setRestarting(false);
-          setUpdating(false);
-          setUpdateError(
-            '等待面板重启超时，请手动刷新页面或检查 systemctl status ezpanel.service',
-          );
-        }
+        // 重启期间请求可能暂时失败，下一轮继续检查。
+      } finally {
+        pollInFlightRef.current = false;
       }
     }, 2500);
   }
@@ -148,7 +159,7 @@ export default function PanelUpdateModal({
         try {
           const res = await applyPanelUpdate(data.latestTag);
           if (res.updating) {
-            startPollAfterRestart(res.targetVersion);
+            startPollAfterRestart(res.targetVersion, res.targetTag);
           }
         } catch (err) {
           setUpdating(false);
@@ -235,7 +246,7 @@ export default function PanelUpdateModal({
                   label: '当前版本',
                   children: (
                     <Typography.Text code>
-                      v{data?.panelVersion || '--'}
+                      {data?.currentTag || `v${data?.panelVersion || '--'}`}
                     </Typography.Text>
                   ),
                 },

@@ -9,6 +9,7 @@ export type Application = {
   category: string;
   description: string;
   installed: boolean;
+  composeMissing?: boolean;
   running: boolean | null;
   version: string | null;
   installedVersions?: string[];
@@ -126,10 +127,6 @@ export const databaseInstanceAction = (
     method: 'POST',
     data: { action },
   });
-export const databaseInstancePassword = (id: string, instance: string) =>
-  request<{ password: string }>(
-    `/api/software/${id}/instances/${instance}/password`,
-  );
 
 export const applicationService = (
   id: string,
@@ -202,8 +199,6 @@ export const saveApplicationSettings = (
     params: { kind },
     data: { content, revision },
   });
-export const scanClamAV = () =>
-  request<{ taskId: string }>('/api/software/clamav/scan', { method: 'POST' });
 export const applicationLogs = (id: string) =>
   request<{ content: string }>(`/api/software/${id}/logs`, {
     silentError: true,
@@ -224,16 +219,6 @@ export const checkApplicationUpdates = (category?: string) =>
     '/api/software/check-updates',
     { method: 'POST', params: category ? { category } : undefined },
   );
-
-export const switchApplication = (
-  id: string,
-  version: string,
-  selection: SourceSelection,
-) =>
-  request<{ taskId: string }>('/api/software/switch', {
-    method: 'POST',
-    data: { id, version, ...selection },
-  });
 
 export type ApplicationGuard = {
   enabled: boolean;

@@ -9,10 +9,11 @@ import {
   X,
 } from 'lucide-react';
 import type { Clipboard } from './FileBrowser';
-import type { FileAction } from './FileList';
+import type { FileAction, FilePluginAction } from './FileList';
 
 export default function FileBatchToolbar({
   count,
+  archiveAction,
   mobileSelect,
   allSelected,
   canSelect,
@@ -20,10 +21,13 @@ export default function FileBatchToolbar({
   onSelectAll,
   onClear,
   onAction,
+  pluginActions,
+  onPlugin,
   onPaste,
   onClearClipboard,
 }: {
   count: number;
+  archiveAction: 'compress' | 'extract';
   mobileSelect: boolean;
   allSelected: boolean;
   canSelect: boolean;
@@ -31,10 +35,13 @@ export default function FileBatchToolbar({
   onSelectAll: () => void;
   onClear: () => void;
   onAction: (action: FileAction) => void;
+  pluginActions: FilePluginAction[];
+  onPlugin: (id: string) => void;
   onPaste: () => void;
   onClearClipboard: () => void;
 }) {
   const selecting = count > 0 || mobileSelect;
+  const archiveLabel = archiveAction === 'extract' ? '解压' : '压缩';
   return (
     <div className="file-toolbar-selection" aria-label="文件批量操作">
       {selecting && (
@@ -79,9 +86,9 @@ export default function FileBatchToolbar({
               disabled={!count}
               className="file-batch-desktop-action"
               icon={<FileArchive size={14} />}
-              onClick={() => onAction('compress')}
+              onClick={() => onAction(archiveAction)}
             >
-              压缩
+              {archiveLabel}
             </Button>
             <Button
               size="small"
@@ -98,7 +105,7 @@ export default function FileBatchToolbar({
                 disabled={!count}
                 menu={{
                   items: [
-                    { key: 'compress', label: '压缩' },
+                    { key: archiveAction, label: archiveLabel },
                     { key: 'permissions', label: '权限' },
                   ],
                   onClick: ({ key }) => onAction(key as FileAction),
@@ -121,6 +128,20 @@ export default function FileBatchToolbar({
             >
               取消选择
             </Button>
+            {count > 0 && pluginActions.length > 0 && (
+              <Dropdown
+                trigger={['click']}
+                menu={{
+                  items: pluginActions.map((action) => ({
+                    key: action.id,
+                    label: action.title,
+                  })),
+                  onClick: ({ key }) => onPlugin(key),
+                }}
+              >
+                <Button size="small">插件操作</Button>
+              </Dropdown>
+            )}
           </div>
         </div>
       )}

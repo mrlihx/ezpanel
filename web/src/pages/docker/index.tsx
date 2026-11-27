@@ -2,10 +2,10 @@ import SectionTabs from '../../components/SectionTabs';
 import { lazy, Suspense } from 'react';
 import { Alert, Button, Modal, Skeleton, Space } from 'antd';
 import TaskDrawer from '../../components/TaskDrawer';
+import ApplicationInstallGuide from '../../components/ApplicationInstallGuide';
 import { LAYOUT } from '../../styles/tokens';
 import useDockerPage from './useDockerPage';
 import RouteNotFound from '../../router/RouteNotFound';
-import { containerSections } from './containerSections';
 
 const ComposeWorkspace = lazy(() => import('./compose'));
 const ContainerManager = lazy(() => import('./ContainerManager'));
@@ -19,6 +19,21 @@ const DockerNetworksPanel = lazy(() => import('./DockerNetworksPanel'));
 const DockerVolumesPanel = lazy(() => import('./DockerVolumesPanel'));
 const DockerRegistriesPanel = lazy(() => import('./DockerRegistriesPanel'));
 const DockerSettingsPanel = lazy(() => import('./DockerSettingsPanel'));
+const containerTabs = [
+  'status',
+  'terminal',
+  'detail',
+  'volumes',
+  'network',
+  'restart',
+  'commit',
+  'edit',
+  'upgrade',
+  'rename',
+  'stats',
+  'logs',
+  'proxy',
+];
 export default function DockerPage() {
   const {
     action,
@@ -83,13 +98,13 @@ export default function DockerPage() {
     volumeBytes,
     volumeList,
   } = useDockerPage();
-  const routedContainer = tab === 'containers' ? view : undefined;
+  const linkedContainer = tab === 'containers' ? view : undefined;
   const invalid =
     route.invalid ||
     (tab === 'containers' &&
       (detailTab ||
-        (routedContainer && !/^[a-f0-9]{12,64}$/.test(routedContainer)) ||
-        (resource && !containerSections.includes(resource)))) ||
+        (linkedContainer && !/^[a-f0-9]{12,64}$/.test(linkedContainer)) ||
+        (resource && !containerTabs.includes(resource)))) ||
     (tab === 'images' && (imageRoute.invalid || resource || detailTab)) ||
     (tab === 'settings' && (settingsRoute.invalid || resource || detailTab)) ||
     (view && !['containers', 'images', 'compose', 'settings'].includes(tab));
@@ -100,19 +115,21 @@ export default function DockerPage() {
     (tab === 'settings' && settingsRoute.loading)
   )
     return <Skeleton active />;
-  const currentDetail = routedContainer
+  if (overview.data?.installed === false)
+    return (
+      <ApplicationInstallGuide
+        name="Docker"
+        install="docker"
+        onDetect={() => void overview.refetch()}
+      />
+    );
+  const activeDetail = linkedContainer
     ? {
-        id: routedContainer,
-        name:
-          containerList.data
-            ?.find((row) => row.Id === routedContainer)
-            ?.Names?.[0]?.replace(/^\//, '') ?? routedContainer.slice(0, 12),
+        id: linkedContainer,
+        name: linkedContainer.slice(0, 12),
         tab: resource ?? 'status',
       }
     : detail;
-  function openContainer(id: string, section: string, replace = false) {
-    void navigate(`/docker/containers/${id}/${section}`, { replace });
-  }
   return (
     <>
       {error && (
@@ -126,13 +143,6 @@ export default function DockerPage() {
         <Alert
           type="info"
           message={overview.data.notice}
-          action={
-            !overview.data.installed && (
-              <Button onClick={() => navigate('/apps?install=docker')}>
-                安装 Docker 引擎
-              </Button>
-            )
-          }
           style={{ marginBottom: 16 }}
         />
       )}
@@ -204,9 +214,7 @@ export default function DockerPage() {
                   prune={prune}
                   run={run}
                   selected={selected}
-                  setDetail={(container) => {
-                    if (container) openContainer(container.id, container.tab);
-                  }}
+                  setDetail={setDetail}
                   setSelected={setSelected}
                   setTerminal={setTerminal}
                   token={token}
@@ -363,37 +371,33 @@ export default function DockerPage() {
           />
         </Suspense>
       )}
-      {currentDetail && (
+      {activeDetail && (
         <Suspense fallback={null}>
           <ContainerManager
-            key={
-              routedContainer
-                ? currentDetail.id
-                : `${currentDetail.id}:${currentDetail.tab}`
-            }
-            id={currentDetail.id}
-            name={currentDetail.name}
-            initialTab={currentDetail.tab}
+            key={linkedContainer ?? `${activeDetail.id}:${activeDetail.tab}`}
+            id={activeDetail.id}
+            name={activeDetail.name}
+            initialTab={activeDetail.tab}
             onTabChange={
-              routedContainer
-                ? (section) => openContainer(routedContainer, section)
+              linkedContainer
+                ? (section) =>
+                    void navigate(
+                      `/docker/containers/${linkedContainer}/${section}`,
+                    )
                 : undefined
             }
             onClose={() => {
-              if (routedContainer)
+              setDetail(undefined);
+              if (linkedContainer)
                 void navigate('/docker/containers', { replace: true });
-              else setDetail(undefined);
             }}
-            onNavigate={() => {
-              if (!routedContainer) setDetail(undefined);
-            }}
+            onNavigate={() => setDetail(undefined)}
             onChanged={(name) => {
-              if (name && !routedContainer)
-                setDetail((current) => current && { ...current, name });
+              if (name) setDetail((current) => current && { ...current, name });
               refresh();
             }}
             onTask={setTask}
-            onTerminal={() => setTerminal(currentDetail.id)}
+            onTerminal={() => setTerminal(activeDetail.id)}
             onOperation={open}
           />
         </Suspense>
@@ -437,10 +441,12 @@ export default function DockerPage() {
             if (finished.action === 'recreate') {
               const result = finished.result as { id: string; name?: string };
               if (
-                routedContainer === finished.resourceId &&
-                result.id !== routedContainer
+                linkedContainer === finished.resourceId &&
+                result.id !== linkedContainer
               ) {
-                openContainer(result.id, 'status', true);
+                void navigate(`/docker/containers/${result.id}/status`, {
+                  replace: true,
+                });
                 return;
               }
               setDetail((current) =>

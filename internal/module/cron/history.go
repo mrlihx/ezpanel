@@ -256,4 +256,7 @@ func (m *Module) cleanupRetention() {
 	if _, err := store.ClearOpLogs(m.db, store.OpLogFilter{}, &logCutoff); err != nil {
 		slog.Warn("清理过期操作日志失败", "error", err)
 	}
+	if err := m.db.Exec("DELETE FROM alert_delivery_logs WHERE created_at < ?", logCutoff).Error; err != nil {
+		slog.Warn("清理过期告警投递日志失败", "error", err)
+	}
 }

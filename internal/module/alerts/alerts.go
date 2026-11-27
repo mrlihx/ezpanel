@@ -13,6 +13,8 @@ import (
 )
 
 type Module struct {
+	providers    NotificationProviders
+	checks       PluginChecks
 	db           *gorm.DB
 	cfg          config.Config
 	packages     *pkgmgr.Manager

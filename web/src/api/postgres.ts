@@ -81,10 +81,14 @@ export const pgCreateDatabase = (
     data,
   });
 
-export const pgDropDatabase = (instance: string, name: string) =>
+export const pgDropDatabase = (
+  instance: string,
+  name: string,
+  silentError = false,
+) =>
   request(
     `/api/db/postgresql/${encodeURIComponent(instance)}/databases/${encodeURIComponent(name)}`,
-    { method: 'DELETE' },
+    { method: 'DELETE', silentError },
   );
 
 export const pgUsers = (instance: string, signal?: AbortSignal) =>
@@ -92,20 +96,6 @@ export const pgUsers = (instance: string, signal?: AbortSignal) =>
     `/api/db/postgresql/${encodeURIComponent(instance)}/users`,
     { signal },
   );
-
-export const pgCreateUser = (
-  instance: string,
-  data: {
-    name: string;
-    password: string;
-    superuser?: boolean;
-    createdb?: boolean;
-  },
-) =>
-  request(`/api/db/postgresql/${encodeURIComponent(instance)}/users`, {
-    method: 'POST',
-    data,
-  });
 
 export const pgSetUserPassword = (
   instance: string,
@@ -115,12 +105,6 @@ export const pgSetUserPassword = (
   request(
     `/api/db/postgresql/${encodeURIComponent(instance)}/users/${encodeURIComponent(name)}/password`,
     { method: 'PUT', data: { password } },
-  );
-
-export const pgDropUser = (instance: string, name: string) =>
-  request(
-    `/api/db/postgresql/${encodeURIComponent(instance)}/users/${encodeURIComponent(name)}`,
-    { method: 'DELETE' },
   );
 
 export const pgTables = (
@@ -163,10 +147,14 @@ export const pgBackups = (
     { signal },
   );
 
-export const pgCreateBackup = (instance: string, dbName: string) =>
+export const pgCreateBackup = (
+  instance: string,
+  dbName: string,
+  silentError = false,
+) =>
   request<PGBackup>(
     `/api/db/postgresql/${encodeURIComponent(instance)}/databases/${encodeURIComponent(dbName)}/backups`,
-    { method: 'POST' },
+    { method: 'POST', silentError },
   );
 
 export const pgDeleteBackup = (

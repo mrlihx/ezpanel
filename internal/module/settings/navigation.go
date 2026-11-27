@@ -17,12 +17,12 @@ var navigationTabs = map[string][]string{
 		"panel/operation", "panel/login", "panel/runtime", "panel/cron", "ssh",
 		"website/logs", "website/operations", "website/analysis",
 		"apps/openresty", "apps/mysql", "apps/mariadb", "apps/redis", "apps/php",
-		"apps/mongodb", "apps/postgresql", "apps/memcached", "apps/docker", "apps/ftp", "apps/rsync", "apps/clamav", "apps/fail2ban", "apps/supervisor",
+		"apps/mongodb", "apps/postgresql", "apps/memcached", "apps/docker", "apps/ftp", "apps/rsync", "apps/clamav", "apps/fail2ban", "apps/supervisor", "apps/frp",
 	},
 	"databases":      {"mysql", "postgresql", "mongodb", "redis", "sqlite"},
 	"apps":           {"web", "database", "tools"},
-	"tools":          {"ip", "swap", "time", "password", "disks", "hosts", "mirrors", "commands", "kernel", "audit"},
-	"settings":       {"basic", "network", "backup", "alerts"},
+	"tools":          {"ip", "swap", "time", "password", "disks", "hosts", "mirrors", "commands", "audit"},
+	"settings":       {"basic", "network", "backup", "alerts", "credentials", "sso"},
 	"alerts":         {"rules", "channels", "logs"},
 	"websites":       {"php", "proxy", "go", "python", "nodejs"},
 	"docker":         {"overview", "containers", "images", "networks", "volumes", "registries", "compose", "settings"},
@@ -31,17 +31,21 @@ var navigationTabs = map[string][]string{
 	"dockerSettings": {"basic", "full"},
 	"ssh":            {"settings", "users", "logs"},
 	"terminal":       {"sessions", "hosts", "commands"},
-	"security":       {"firewall", "ssh"},
+	"security":       {"firewall", "ssh", "hardening"},
 	"waf":            {"overview", "events", "rules", "sites", "policy"},
 }
 
+const databaseInstanceSuffix = `(?:[a-z2-7]{6}|[a-z2-7]{26})`
+
 var databaseNavigation = map[string]*regexp.Regexp{
 	"oplogSite":          regexp.MustCompile(`^[0-9a-f]{32}$`),
-	"postgresqlInstance": regexp.MustCompile(`^(?:__all__|default|[a-z2-7]{26})$`),
-	"mysqlInstance":      regexp.MustCompile(`^(?:local-mysql|[0-9a-f]{32}|mysql-[a-z2-7]{26})$`),
-	"mongodbInstance":    regexp.MustCompile(`^(?:local|[0-9a-f]{32}|mongodb-[a-z2-7]{26})$`),
-	"redisInstance":      regexp.MustCompile(`^(?:local|[0-9a-f]{32}|redis-[a-z2-7]{26})$`),
+	"postgresqlInstance": regexp.MustCompile(`^(?:__all__|default|` + databaseInstanceSuffix + `)$`),
+	"mysqlInstance":      regexp.MustCompile(`^(?:local-mysql|[0-9a-f]{32}|mysql-` + databaseInstanceSuffix + `)$`),
+	"mongodbInstance":    regexp.MustCompile(`^(?:local|[0-9a-f]{32}|mongodb-` + databaseInstanceSuffix + `)$`),
+	"redisInstance":      regexp.MustCompile(`^(?:local|[0-9a-f]{32}|redis-` + databaseInstanceSuffix + `)$`),
 }
+
+var supervisorLogSource = regexp.MustCompile(`^[0-9a-f]{16}$`)
 
 func validNavigation(section, value string) bool {
 	if format := databaseNavigation[section]; format != nil {
@@ -49,6 +53,12 @@ func validNavigation(section, value string) bool {
 	}
 	if section == "oplogs" && strings.HasPrefix(value, "apps/") {
 		if app, source, ok := strings.Cut(strings.TrimPrefix(value, "apps/"), "/"); ok {
+			switch app {
+			case "supervisor":
+				return source == "main" || supervisorLogSource.MatchString(source)
+			case "frp":
+				return source == "frps" || source == "frpc"
+			}
 			return slices.Contains(navigationTabs[section], "apps/"+app) &&
 				slices.Contains([]string{"access", "container", "error", "file", "journal", "slow", "transfer"}, source)
 		}

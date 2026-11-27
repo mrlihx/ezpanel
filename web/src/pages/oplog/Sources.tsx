@@ -42,7 +42,7 @@ export function RuntimeLogs() {
     queryFn: runtimeLog,
   });
   return (
-    <>
+    <div className="logs-runtime">
       <div className="logs-toolbar">
         <div className="logs-controls">
           <Button
@@ -75,12 +75,13 @@ export function RuntimeLogs() {
         />
       </div>
       <LogOutput
+        fill
         data={query.data}
         loading={query.isFetching}
         error={query.error}
         keyword={keyword}
       />
-    </>
+    </div>
   );
 }
 
@@ -296,6 +297,7 @@ export function SSHLogs({
 }
 
 export const logApps = {
+  frp: 'Frp服务',
   openresty: 'OpenResty',
   mysql: 'MySQL',
   mariadb: 'MariaDB',

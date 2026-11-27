@@ -1,0 +1,302 @@
+# ==============================================================================
+# EzPanel演示插件清单（SDK 1 / Host v1）
+# ------------------------------------------------------------------------------
+# 校验规则要点（见 ezpanel/internal/plugin/manifest.go）：
+# 1. 严格 YAML 模式：禁止未知字段、重复键、类型隐式转换与 YAML 别名（&/*）。
+# 2. 整数白名单字段：仅 sdkVersion / order / width / height / cpuPercent / memoryMiB / maxProcesses。
+# 3. 布尔白名单字段：仅 required / secret / multiple / webhook / embed。
+# 4. 其余所有标量（尤其是 env.default / params.default 中的数字、布尔与空串）必须显式加引号为字符串。
+# ==============================================================================
+
+# 1. 基础元数据（在应用商店列表与「设置 → 服务 → 基本信息」展示）
+id: ezpanel-demo-plugin
+name: EzPanel演示插件
+version: "0.2.1"
+description: EzPanel SDK 1 / Host v1 全能力官方演示插件：覆盖隔离前端、Linux systemd 沙箱、全部 Host API、扩展渠道、定时/工作流/Webhook 任务、事件订阅与资源菜单
+author: EzPanel
+homepage: "https://github.com/mrlihx/ezpanel"
+openMode: embed # 打开方式：embed（面板框架内打开，默认）或 new_tab（保留面板导航的新标签页）
+type: process   # 进程插件（process）支持后端 Go 服务与 Host v1 能力；static 禁止后端声明
+minPanelVersion: "0.0.0"
+sdkVersion: 1
+
+# 2. 多架构后端入口（按目标 Linux 架构打包，不依赖 ZIP 执行位）
+entry:
+  linux-amd64: bin/linux-amd64/server
+  linux-arm64: bin/linux-arm64/server
+
+# 3. Linux 进程沙箱边界（由 systemd 独立管控；与兼容模式特权命令 exec.run 互斥）
+sandbox:
+  cpuPercent: 100   # CPU 配额（100 = 1 核）
+  memoryMiB: 256    # 内存上限（16 - 16384 MiB）
+  maxProcesses: 64  # 最大进程/线程数（8 - 1024）
+  network: loopback # 网络模式：loopback（仅本机回环）或 outbound（允许外网访问）
+
+# 4. 前端入口与隔离模式（最新版面板统一采用 isolated 沙箱 iframe 模式）
+ui: web/entry.js
+uiMode: isolated
+
+# 5. 面板左侧菜单与二级子路由（图标仅限基座白名单；插件内通过 sdk.route 与 sdk.navigate 联动）
+menu:
+  title: EzPanel演示插件
+  icon: AppstoreOutlined
+  order: 90
+  children:
+    - title: 总览与 SDK
+      path: overview
+      icon: AppstoreOutlined
+    - title: 资源与运维
+      path: resources
+      icon: CloudServerOutlined
+    - title: 文件与存储
+      path: files
+      icon: FileOutlined
+    - title: 任务与事件
+      path: automation
+      icon: SettingOutlined
+    - title: 扩展渠道与钩子
+      path: providers
+      icon: SafetyOutlined
+    - title: 凭据与审计
+      path: security
+      icon: ToolOutlined
+
+# 6. Host v1 权限矩阵（除兼容模式 exec.run 与跨插件调用 services.call 外的全量权限）
+# 注：安装与升级时会按风险等级在面板中展示供管理员确认；实际资源范围在「设置 → 授权」配置。
+permissions:
+  # 系统概览与监控
+  - sysinfo.read
+  - monitoring.read
+  - monitoring.provide
+  # 受控文件系统（须与 fsRoots 成对声明）
+  - fs.read
+  - fs.write
+  # 网站与网站备份
+  - sites.read
+  - sites.logs.read
+  - sites.control
+  - sites.restart
+  - backups.read
+  - backups.create
+  - backups.verify
+  - backups.restore
+  # Docker 容器
+  - containers.read
+  - containers.logs.read
+  - containers.metrics.read
+  - containers.control
+  # 数据库实例与备份恢复
+  - databases.read
+  - databases.backup
+  - databases.restore
+  # SSL 证书
+  - certificates.read
+  - certificates.bind
+  - certificates.renew
+  # Compose 项目与部署钩子
+  - compose.read
+  - compose.deploy
+  - deployment.hooks
+  # 系统应用
+  - apps.read
+  - apps.control
+  # 安全状态、加固扫描与插件审计
+  - security.read
+  - hardening.scan
+  - audit.read
+  # 通知发送与扩展渠道提供方
+  - notifications.send
+  - notifications.provider
+  - backup.storage
+  - acme.dns
+  # 外部凭据、任务/Webhook、事件订阅、概览卡片与跨插件服务
+  - credentials.read
+  - jobs.run
+  - jobs.webhook
+  - events.subscribe
+  - dashboard.widget
+  - services.provide
+
+# 7. Host 文件接口授权根目录（必须为存在的绝对目录，且不得指向系统或面板受保护路径）
+fsRoots:
+  - /tmp
+
+# 8. 应用商店「设置 → 配置」表单定义（覆盖全部 7 种控件类型：text / password / number / boolean / select / file / directory）
+# 面板会自动生成表单、校验类型并支持 JSON 导入导出（导出时自动省略 secret 字段）。
+env:
+  - key: WEBHOOK_SECRET
+    label: Webhook 签名密钥（必填）
+    default: ""
+    required: true
+    secret: true
+    type: password
+    help: "【password / secret】启用 jobs.webhook 必填，至少 32 字节随机字符串（可用 openssl rand -hex 24 生成），用于 HMAC-SHA256 验签。保存后不回显，留空保持原值，勾选下方复选框可清空。"
+  - key: DEMO_TOKEN
+    label: 示例第三方令牌
+    default: ""
+    required: false
+    secret: true
+    type: password
+    help: "【password / secret】演示加密存储与脱敏指纹展示（前端仅显示字节数与 SHA-256 前 12 位）。保存后不回显，留空保持原值，勾选下方复选框可清空。"
+  - key: GREETING
+    label: 欢迎语
+    default: "你好，欢迎体验 EzPanel演示插件"
+    required: false
+    secret: false
+    type: text
+    help: "【text】单行文本示例，保存后将在插件「总览与 SDK」页展示。"
+  - key: HISTORY_LIMIT
+    label: 本地历史保留条数
+    default: "50"
+    required: true
+    secret: false
+    type: number
+    help: "【number】整数配置示例（范围 5-200，默认 50），控制插件本地 state.json 保留的任务、事件与扩展日志上限。"
+  - key: AUTO_NOTIFY
+    label: 任务完成后自动发送通知
+    default: "false"
+    required: false
+    secret: false
+    type: boolean
+    help: "【boolean】布尔配置示例（字符串 true/false）。开启后，快速巡检任务执行结束时将尝试调用 Host.Notify 发送面板通知。"
+  - key: INSPECT_MODE
+    label: 巡检模式
+    default: "standard"
+    required: true
+    secret: false
+    type: select
+    options:
+      - standard
+      - strict
+      - verbose
+    help: "【select】下拉单选配置示例，可选 standard（标准）、strict（严格）或 verbose（详细），影响巡检任务日志摘要。"
+  - key: SAMPLE_FILE
+    label: 示例文件路径
+    default: ""
+    required: false
+    secret: false
+    type: file
+    help: "【file】面板文件选择器示例，须填写或选择服务器上的绝对文件路径（仅作配置展示，受控读写仍受 fsRoots 约束）。"
+  - key: WORK_DIR
+    label: 默认工作目录
+    default: "/tmp"
+    required: false
+    secret: false
+    type: directory
+    help: "【directory】面板目录选择器示例，须为绝对目录路径（默认 /tmp），用作「文件与存储」标签页演示入口。"
+
+# 9. 定时任务、顺序工作流与 Webhook 触发（在「设置 → 授权」配置 Cron 与手动执行）
+jobs:
+  - id: quick-inspect
+    title: 快速巡检任务（带参数示例）
+    params:
+      - key: TARGET_LABEL
+        label: 巡检标签
+        default: "daily-check"
+        required: true
+        secret: false
+        type: text
+        help: "标识本次巡检用途的自定义标签，将记录在任务日志与本地执行历史中"
+      - key: SAMPLE_COUNT
+        label: 采样次数
+        default: "3"
+        required: true
+        secret: false
+        type: number
+        help: "模拟采样轮次（整数 ≥ 1），仅用于演示数字类型任务参数"
+      - key: SEND_NOTICE
+        label: 发送汇总通知
+        default: "false"
+        required: false
+        secret: false
+        type: boolean
+        help: "设为 true 且已授权通知渠道时，任务结束后自动调用 Host.Notify"
+      - key: LEVEL
+        label: 巡检级别
+        default: "normal"
+        required: true
+        secret: false
+        type: select
+        options:
+          - normal
+          - deep
+        help: "选择 normal（常规）或 deep（深度）巡检深度"
+  - id: staged-workflow
+    title: 多步骤巡检工作流（支持 Webhook）
+    webhook: true # 允许通过 POST /plugin-webhooks/ezpanel-demo-plugin/staged-workflow 外部签名触发
+    steps:
+      - check-env
+      - collect-metrics
+      - write-report
+    params:
+      - key: NOTE
+        label: 触发备注
+        default: "scheduled-run"
+        required: false
+        secret: false
+        type: text
+        help: "可通过手动运行、Cron 定时计划或外部 Webhook 请求体传入备注信息"
+
+# 10. 面板事件订阅（须与对应读权限成对声明，在「设置 → 授权」勾选订阅）
+events:
+  - site.backup.finished
+  - certificate.renewal.finished
+  - site.project.finished
+  - compose.task.finished
+  - database.backup.finished
+
+# 11. 面板各业务页面扩展入口
+siteAction:
+  title: 能力 Demo 检查
+  embed: true # 内嵌为「网站设置」中的独立标签页，通过 sdk.context?.siteId 获取当前站点
+fileAction:
+  title: 在能力 Demo 中检查
+  multiple: true # 支持「文件管理」右键菜单及批量多选，通过 sdk.context?.filePaths 获取路径列表
+resourceActions: # 四大资源列表操作菜单，点击后通过 sdk.context?.resource 传入 kind/id/name/engine
+  sites: 在能力 Demo 中查看网站
+  containers: 在能力 Demo 中查看容器
+  databases: 在能力 Demo 中查看数据库
+  certificates: 在能力 Demo 中查看证书
+dashboard:
+  title: EzPanel演示插件 # 面板「概览」页卡片，每 60 秒轮询 GET /api/dashboard
+
+# 12. 四大面板扩展渠道（备份存储 / 通知 / ACME DNS / 企业 SSO）
+backupProvider:
+  name: Demo 私有存储
+  fields:
+    - key: folder
+      label: 存储子目录（插件私有目录下相对路径）
+      type: text
+      required: true
+    - key: access-token
+      label: 访问令牌（演示渠道加密字段）
+      type: password
+      required: true
+    - key: quota-mb
+      label: 单文件大小上限（MiB，留空不限制）
+      type: number
+    - key: storage-tier
+      label: 存储级别
+      type: select
+      options:
+        - standard
+        - archive
+notificationProvider:
+  title: Demo 通知收件箱
+dnsProvider:
+  title: Demo DNS 记录
+ssoProvider:
+  title: Demo 企业 SSO
+
+# 13. 插件间服务、自定义监控探针与外部凭据槽
+services:
+  - echo-service
+  - summary-service
+checks:
+  - id: runtime-health
+    title: 插件运行健康
+  - id: custom-probe
+    title: 可控模拟探针
+credentialSlots:
+  - id: demo-api-key
+    title: 示例外部 API 密钥

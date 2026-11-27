@@ -25,6 +25,7 @@ type channelTarget struct {
 	backupChannel
 	url      *url.URL
 	password string
+	storage  *channelStorage
 }
 
 func (s *channelStorage) target(ctx context.Context, id string, uploading bool) (channelTarget, error) {
@@ -39,6 +40,9 @@ func (s *channelStorage) target(ctx context.Context, id string, uploading bool) 
 }
 
 func (s *channelStorage) openTarget(row backupChannel) (channelTarget, error) {
+	if strings.HasPrefix(row.Protocol, PluginProtocolPrefix) {
+		return channelTarget{backupChannel: row, storage: s}, nil
+	}
 	address, err := url.Parse(row.Endpoint)
 	if err != nil {
 		return channelTarget{}, errors.New("远程备份渠道地址无效")
@@ -47,7 +51,7 @@ func (s *channelStorage) openTarget(row backupChannel) (channelTarget, error) {
 	if err != nil {
 		return channelTarget{}, errors.New("无法读取远程备份渠道凭据")
 	}
-	return channelTarget{backupChannel: row, url: address, password: password}, nil
+	return channelTarget{backupChannel: row, url: address, password: password, storage: s}, nil
 }
 
 func (target channelTarget) remotePath(key string) string {
@@ -91,11 +95,13 @@ func (target channelTarget) sftp(ctx context.Context) (*sftp.Client, error) {
 	if err != nil {
 		return nil, errors.New("无法连接 SFTP 备份服务器")
 	}
+	fingerprint := ""
 	config := &ssh.ClientConfig{
 		User: target.Username, Auth: []ssh.AuthMethod{ssh.Password(target.password)},
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
-			if ssh.FingerprintSHA256(key) != target.Fingerprint {
-				return errors.New("SFTP 主机公钥指纹不匹配")
+			fingerprint = ssh.FingerprintSHA256(key)
+			if target.Fingerprint != "" && fingerprint != target.Fingerprint {
+				return errors.New("SFTP 服务器公钥已变化，确认服务器后请重新填写密码并保存渠道")
 			}
 			return nil
 		},
@@ -111,6 +117,16 @@ func (target channelTarget) sftp(ctx context.Context) (*sftp.Client, error) {
 	if err != nil {
 		_ = session.Close()
 		return nil, errors.New("SFTP 子系统不可用")
+	}
+	// 首次认证成功后自动记录主机公钥，后续连接校验服务器身份。
+	if target.Fingerprint == "" && target.storage != nil {
+		result := target.storage.db.WithContext(ctx).Model(&backupChannel{}).
+			Where("id = ? AND endpoint = ? AND (fingerprint = '' OR fingerprint = ?)", target.ID, target.Endpoint, fingerprint).
+			Update("fingerprint", fingerprint)
+		if result.Error != nil || result.RowsAffected == 0 {
+			_ = client.Close()
+			return nil, errors.New("无法记录 SFTP 服务器公钥，请重新连接")
+		}
 	}
 	return client, nil
 }
@@ -220,6 +236,13 @@ func (s *channelStorage) Upload(ctx context.Context, id, key string, source io.R
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
+	if strings.HasPrefix(target.Protocol, PluginProtocolPrefix) {
+		body, err := s.callPlugin(ctx, target.backupChannel, "upload", key, source)
+		if err != nil {
+			return "", err
+		}
+		return key, body.Close()
+	}
 	parents := strings.Split(key, "/")
 	parents = parents[:len(parents)-1]
 	switch target.Protocol {
@@ -300,6 +323,13 @@ func (s *channelStorage) Open(ctx context.Context, id, key string) (reader io.Re
 			cancel()
 		}
 	}()
+	if strings.HasPrefix(target.Protocol, PluginProtocolPrefix) {
+		body, err := s.callPlugin(ctx, target.backupChannel, "open", key, nil)
+		if err != nil {
+			return nil, err
+		}
+		return channelDownload{body, cancel}, nil
+	}
 	switch target.Protocol {
 	case "ftp":
 		client, err := target.ftp(ctx)
@@ -339,6 +369,13 @@ func (s *channelStorage) Delete(ctx context.Context, id, key string) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
+	if strings.HasPrefix(target.Protocol, PluginProtocolPrefix) {
+		body, err := s.callPlugin(ctx, target.backupChannel, "delete", key, nil)
+		if err != nil {
+			return err
+		}
+		return body.Close()
+	}
 	switch target.Protocol {
 	case "ftp":
 		client, err := target.ftp(ctx)

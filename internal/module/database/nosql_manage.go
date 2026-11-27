@@ -124,6 +124,72 @@ func (m *Module) revealMongoPassword(c *gin.Context) {
 		return nil
 	})
 }
+func (m *Module) createMongoDatabaseAccount(c *gin.Context) {
+	name, connection := c.Param("database"), c.Param("connection")
+	if c.Param("engine") != "mongodb" || !mongoBusinessDatabase(name) {
+		response.Fail(c, response.Invalid, "数据库名称无效")
+		return
+	}
+	var in struct{ Username, Password string }
+	if !response.Bind(c, &in) {
+		return
+	}
+	in.Username = strings.TrimSpace(in.Username)
+	if in.Username == "" || len(in.Username) > 128 || strings.ContainsRune(in.Username, 0) ||
+		in.Password == "" || len(in.Password) > 4096 || strings.ContainsRune(in.Password, 0) {
+		response.Fail(c, response.Invalid, "请输入有效的专属账号和密码")
+		return
+	}
+	release, err := m.tasks.Acquire(LockKey("mongodb:" + connection))
+	if err != nil {
+		failure(c, err)
+		return
+	}
+	defer release()
+	m.withMongo(c, func(ctx context.Context, client *mongo.Client) error {
+		names, err := client.ListDatabaseNames(ctx, bson.D{{Key: "name", Value: name}})
+		if err != nil {
+			return err
+		}
+		if !slices.Contains(names, name) {
+			return gorm.ErrRecordNotFound
+		}
+		users, err := mongoUsers(ctx, client, name)
+		if err != nil {
+			return err
+		}
+		if len(users) > 0 {
+			return errors.New("此库已有独立账号，请在列表中使用改密")
+		}
+		if err := m.mongoCreateAccount(ctx, client, connection, name, in.Username, in.Password); err != nil {
+			return err
+		}
+		response.OK(c, nil)
+		return nil
+	})
+}
+
+func (m *Module) mongoCreateAccount(ctx context.Context, client *mongo.Client, connection, name, username, password string) error {
+	encrypted, err := store.Encrypt(m.cfg.AESKey, password)
+	if err != nil {
+		return err
+	}
+	if err := client.Database(name).RunCommand(ctx, bson.D{
+		{Key: "createUser", Value: username}, {Key: "pwd", Value: password},
+		{Key: "roles", Value: bson.A{bson.D{{Key: "role", Value: "readWrite"}, {Key: "db", Value: name}}}},
+	}).Err(); err != nil {
+		return errors.New("专属账号创建失败，请检查用户管理权限")
+	}
+	row := store.MongoMetadata{ConnectionID: connection, Name: name, Username: username, PasswordEnc: encrypted}
+	if err := m.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "connection_id"}, {Name: "name"}},
+		DoUpdates: clause.AssignmentColumns([]string{"username", "password_enc"}),
+	}).Create(&row).Error; err != nil {
+		return errors.New("专属账号已创建，但面板密码记录保存失败")
+	}
+	return nil
+}
+
 func (m *Module) mongoChangePassword(ctx context.Context, client *mongo.Client, connection, name, username, password string) error {
 	users, err := mongoUsers(ctx, client, name)
 	if err != nil {

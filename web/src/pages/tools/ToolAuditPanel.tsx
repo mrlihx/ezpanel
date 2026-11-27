@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import { Alert, Button, Space, Switch, Tabs, Typography } from 'antd';
+import { Alert, Button, Space, Switch, Tabs } from 'antd';
 import { request } from '../../api/client';
 import ContentSizedTable from '../../components/ContentSizedTable';
 import { formatTime } from '../../utils/format';
 import LogText from '../../components/LogText';
-import { LAYOUT } from '../../styles/tokens';
 import type { ToolboxPageState } from './index';
 
 export default function ToolAuditPanel({
@@ -27,7 +26,7 @@ export default function ToolAuditPanel({
 >) {
   const [installing, setInstalling] = useState(false);
   return (
-    <>
+    <div className="tool-audit-panel">
       {audit.data && (
         <>
           <Alert
@@ -75,6 +74,7 @@ export default function ToolAuditPanel({
             <Button onClick={() => void audit.refetch()}>刷新</Button>
           </Space>
           <Tabs
+            className="tool-audit-tabs"
             items={[
               {
                 key: 'panel',
@@ -114,24 +114,16 @@ export default function ToolAuditPanel({
                 key: 'system',
                 label: '系统命令',
                 children: (
-                  <Typography.Paragraph>
-                    <LogText
-                      style={{
-                        maxHeight: LAYOUT.configEditorHeight,
-                        overflow: 'auto',
-                        whiteSpace: 'pre-wrap',
-                      }}
-                    >
-                      {audit.data.content ||
-                        '暂无系统命令记录；启用后从新的进程启动开始采集。'}
-                    </LogText>
-                  </Typography.Paragraph>
+                  <LogText className="tool-audit-output">
+                    {audit.data.content ||
+                      '暂无系统命令记录；启用后从新的进程启动开始采集。'}
+                  </LogText>
                 ),
               },
             ]}
           />
         </>
       )}
-    </>
+    </div>
   );
 }

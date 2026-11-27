@@ -1,12 +1,66 @@
 import { Button, Dropdown, Flex, Space, Tooltip, Typography } from 'antd';
 import { ChevronDown, Pause, Play, Plus } from 'lucide-react';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { request } from '../../api/client';
 import ContentSizedTable from '../../components/ContentSizedTable';
-import { type Container } from '../../api/docker';
+import { inspectContainer, type Container } from '../../api/docker';
 import { formatTime } from '../../utils/format';
+import { useResourceActions } from '../../plugins/ResourceActions';
 
 import { containerOwnership } from './containerOwnership';
 import type { DockerPageState } from './useDockerPage';
+
+function ContainerMoreActions({
+  row,
+  onSelect,
+}: {
+  row: Container;
+  onSelect: (tab: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const pluginActions = useResourceActions('containers')(
+    row.Id,
+    row.Names?.[0]?.replace(/^\//, ''),
+  );
+  const owner = containerOwnership(row.Labels, row.Names?.[0] ?? '');
+  const detail = useQuery({
+    queryKey: ['docker-container-detail', row.Id],
+    queryFn: ({ signal }) => inspectContainer(row.Id, signal),
+    enabled: open && !owner && row.State !== 'paused',
+  });
+  const editable =
+    !owner &&
+    row.State !== 'paused' &&
+    detail.data &&
+    !detail.data.HostConfig.AutoRemove &&
+    !detail.data.State.Paused;
+  return (
+    <Dropdown
+      trigger={['click']}
+      open={open}
+      onOpenChange={setOpen}
+      menu={{
+        items: [
+          ...(editable ? [{ key: 'edit', label: '编辑配置' }] : []),
+          { key: 'restart', label: '资源与重启策略' },
+          ...(!owner ? [{ key: 'rename', label: '重命名' }] : []),
+          { key: 'logs', label: '日志' },
+          { key: 'stats', label: '实时监控' },
+          ...pluginActions,
+        ],
+        onClick: ({ key }) => {
+          setOpen(false);
+          if (!key.startsWith('plugin-')) onSelect(key);
+        },
+      }}
+    >
+      <Button type="link" style={{ padding: 0 }}>
+        更多
+      </Button>
+    </Dropdown>
+  );
+}
 
 export default function DockerContainersPanel({
   action,
@@ -66,7 +120,7 @@ export default function DockerContainersPanel({
             创建容器
           </Button>
           <Dropdown
-            disabled={!selected.length || busy}
+            disabled={!online || !selected.length || busy}
             menu={{
               items: [
                 { key: 'start', label: '批量启动' },
@@ -78,12 +132,54 @@ export default function DockerContainersPanel({
                   title: `对${selected.length}个容器执行${key}？`,
                   onOk: () =>
                     run(async () => {
-                      for (const id of selected)
-                        await request(`/api/docker/containers/${id}/action`, {
-                          method: 'POST',
-                          data: { action: key },
+                      const failures: {
+                        id: (typeof selected)[number];
+                        message: string;
+                      }[] = [];
+                      for (const id of selected) {
+                        try {
+                          await request(`/api/docker/containers/${id}/action`, {
+                            method: 'POST',
+                            data: { action: key },
+                            silentError: true,
+                          });
+                        } catch (error) {
+                          failures.push({
+                            id,
+                            message:
+                              error instanceof Error
+                                ? error.message
+                                : '操作失败',
+                          });
+                        }
+                      }
+                      setSelected(failures.map(({ id }) => id));
+                      if (failures.length) {
+                        modal.warning({
+                          title: `成功 ${selected.length - failures.length} 项，失败 ${failures.length} 项`,
+                          content: (
+                            <ul
+                              style={{
+                                maxHeight: 240,
+                                overflow: 'auto',
+                                overflowWrap: 'anywhere',
+                              }}
+                            >
+                              {failures.map(({ id, message }) => {
+                                const row = containerList.data?.find(
+                                  (container) => container.Id === id,
+                                );
+                                return (
+                                  <li key={id}>
+                                    {row ? itemName(row) : String(id)}：
+                                    {message}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          ),
                         });
-                      setSelected([]);
+                      }
                     }),
                 }),
             }}
@@ -104,6 +200,7 @@ export default function DockerContainersPanel({
         rowSelection={{
           selectedRowKeys: selected,
           onChange: setSelected,
+          getCheckboxProps: () => ({ disabled: busy }),
         }}
         dataSource={containerList.data?.filter((r) =>
           match(`${itemName(r)} ${r.Id} ${r.Image} ${containerImageName(r)}`),
@@ -267,28 +364,12 @@ export default function DockerContainersPanel({
                 >
                   删除
                 </Button>
-                <Dropdown
-                  trigger={['click']}
-                  menu={{
-                    items: [
-                      { key: 'edit', label: '编辑配置' },
-                      { key: 'restart', label: '资源与重启策略' },
-                      { key: 'rename', label: '重命名' },
-                      { key: 'logs', label: '日志' },
-                      { key: 'stats', label: '实时监控' },
-                    ],
-                    onClick: ({ key }) =>
-                      setDetail({
-                        id: row.Id,
-                        name: itemName(row),
-                        tab: key,
-                      }),
-                  }}
-                >
-                  <Button type="link" style={{ padding: 0 }}>
-                    更多
-                  </Button>
-                </Dropdown>
+                <ContainerMoreActions
+                  row={row}
+                  onSelect={(tab) =>
+                    setDetail({ id: row.Id, name: itemName(row), tab })
+                  }
+                />
               </Space>
             ),
           },

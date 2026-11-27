@@ -34,7 +34,11 @@ export default function AccountModal({
     >
       <Form
         form={form}
-        layout="vertical"
+        layout="horizontal"
+        labelAlign="left"
+        labelCol={{ flex: '96px' }}
+        wrapperCol={{ flex: 1 }}
+        colon={false}
         initialValues={isPassword ? undefined : { value: username }}
         onFinish={(values) => {
           modal.confirm({
@@ -45,7 +49,6 @@ export default function AccountModal({
               try {
                 const result = await saveAccount({
                   username: isPassword ? username : values.value,
-                  currentPassword: values.currentPassword,
                   newPassword: isPassword ? values.value : undefined,
                 });
                 setUser(null);
@@ -58,59 +61,58 @@ export default function AccountModal({
         }}
       >
         <Form.Item
-          label="当前密码"
-          name="currentPassword"
-          rules={[{ required: true, message: '请输入当前密码' }]}
-        >
-          <Input.Password autoComplete="current-password" />
-        </Form.Item>
-        <Form.Item
-          label={
-            <Space>
-              {`新${field}`}
-              {isPassword && (
-                <Button
-                  type="link"
-                  size="small"
-                  onClick={() => {
-                    const bytes = crypto.getRandomValues(new Uint8Array(12));
-                    const password = `Aa1${Array.from(bytes, (n) => n.toString(16).padStart(2, '0')).join('')}`;
-                    form.setFieldsValue({
-                      value: password,
-                      confirm: undefined,
-                    });
-                  }}
-                >
-                  随机生成
-                </Button>
-              )}
-            </Space>
-          }
-          name="value"
+          label={`新${field}`}
+          required
           extra={
             isPassword
               ? '至少8个字符，包含字母和数字，最多72个UTF-8字节。'
               : '3至32位字母、数字或_.-，首位为字母、数字或下划线。'
           }
-          rules={[
-            { required: true, message: `请输入新${field}` },
-            isPassword
-              ? {
-                  validator: (_, value: string) =>
-                    !value || validPassword(value)
-                      ? Promise.resolve()
-                      : Promise.reject(new Error('密码长度或格式不符合要求')),
-                }
-              : {
+        >
+          {isPassword ? (
+            <Space.Compact style={{ width: '100%' }}>
+              <Form.Item
+                name="value"
+                noStyle
+                rules={[
+                  { required: true, message: `请输入新${field}` },
+                  {
+                    validator: (_, value: string) =>
+                      !value || validPassword(value)
+                        ? Promise.resolve()
+                        : Promise.reject(new Error('密码长度或格式不符合要求')),
+                  },
+                ]}
+              >
+                <Input.Password autoComplete="new-password" />
+              </Form.Item>
+              <Button
+                onClick={() => {
+                  const bytes = crypto.getRandomValues(new Uint8Array(12));
+                  const password = `Aa1${Array.from(bytes, (n) => n.toString(16).padStart(2, '0')).join('')}`;
+                  form.setFieldsValue({
+                    value: password,
+                    confirm: undefined,
+                  });
+                }}
+              >
+                随机生成
+              </Button>
+            </Space.Compact>
+          ) : (
+            <Form.Item
+              name="value"
+              noStyle
+              rules={[
+                { required: true, message: `请输入新${field}` },
+                {
                   pattern: /^[a-zA-Z0-9_][a-zA-Z0-9_.-]{2,31}$/,
                   message: '账号格式不符合要求',
                 },
-          ]}
-        >
-          {isPassword ? (
-            <Input.Password autoComplete="new-password" />
-          ) : (
-            <Input autoComplete="username" maxLength={32} />
+              ]}
+            >
+              <Input autoComplete="username" maxLength={32} />
+            </Form.Item>
           )}
         </Form.Item>
         <Form.Item

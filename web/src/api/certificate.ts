@@ -27,7 +27,7 @@ export type CertificateOrder = {
   email: string;
   method: 'http-01' | 'dns-01';
   siteId: string;
-  status: 'creating' | 'pending' | 'issuing' | 'valid' | 'failed';
+  status: 'creating' | 'pending' | 'issuing' | 'valid' | 'failed' | 'cancelled';
   error: string;
   certificateId: string;
   autoDeploy: boolean;
@@ -43,7 +43,13 @@ export type CertificateOrder = {
 export type CertificateOrderInput = Pick<
   CertificateOrder,
   'domains' | 'email' | 'method' | 'algorithm'
-> & { siteId?: string; renewalId?: string; acceptTerms: true };
+> & {
+  siteId?: string;
+  renewalId?: string;
+  dnsProvider?: string;
+  inheritDNSProvider?: boolean;
+  acceptTerms: true;
+};
 
 export const certificates = (page: number, size: number, keyword: string) =>
   request<{ list: Certificate[]; total: number }>('/api/certificates', {
@@ -95,6 +101,12 @@ export const completeCertificateOrder = (id: string) =>
     `/api/certificates/orders/${encodeURIComponent(id)}/complete`,
     { method: 'POST', silentError: true },
   );
+
+export const cancelCertificateOrder = (id: string) =>
+  request(`/api/certificates/orders/${encodeURIComponent(id)}/cancel`, {
+    method: 'POST',
+    silentError: true,
+  });
 
 export const retryCertificateOrderDeploy = (id: string) =>
   request<{ orderId: string; taskId: string }>(

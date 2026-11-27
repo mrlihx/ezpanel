@@ -287,6 +287,7 @@ func (m *Manager) upgradePHPContainer(ctx context.Context, id string, release Re
 
 func selectPHPSocket(link, slot string) error {
 	temporary := link + ".next"
+	_ = os.Remove(temporary)
 	if err := os.Symlink(slot, temporary); err != nil {
 		return err
 	}

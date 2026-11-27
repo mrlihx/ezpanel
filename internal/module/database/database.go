@@ -17,6 +17,7 @@ import (
 
 	"ezpanel/internal/auth"
 	"ezpanel/internal/config"
+	"ezpanel/internal/pathsafe"
 	"ezpanel/internal/pkgmgr"
 	"ezpanel/internal/response"
 	"ezpanel/internal/store"
@@ -27,18 +28,21 @@ import (
 )
 
 type Module struct {
-	localMu  sync.Mutex
-	sqliteMu sync.Mutex
-	pgMetaMu sync.Mutex
-	db       *gorm.DB
-	cfg      config.Config
-	tasks    *task.Manager
-	packages *pkgmgr.Manager
-	auth     *auth.Service
+	localMu        sync.Mutex
+	sqliteMu       sync.Mutex
+	pgMetaMu       sync.Mutex
+	sqlitePolicyMu sync.Mutex
+	sqlitePolicy   *pathsafe.Policy
+	db             *gorm.DB
+	cfg            config.Config
+	tasks          *task.Manager
+	packages       *pkgmgr.Manager
+	auth           *auth.Service
 }
 
 func New(db *gorm.DB, cfg config.Config, tasks *task.Manager, packages *pkgmgr.Manager, a *auth.Service) *Module {
-	return &Module{db: db, cfg: cfg, tasks: tasks, packages: packages, auth: a}
+	policy, _ := pathsafe.New(cfg.InstallDir)
+	return &Module{db: db, cfg: cfg, tasks: tasks, packages: packages, auth: a, sqlitePolicy: policy}
 }
 func (m *Module) Name() string  { return "database" }
 func LockKey(sid string) string { return "database:" + sid }
@@ -151,8 +155,7 @@ type input struct {
 
 func (m *Module) parse(c *gin.Context, old store.DBServer) (store.DBServer, *string, bool) {
 	var p input
-	if c.ShouldBindJSON(&p) != nil {
-		response.Fail(c, response.Invalid, "连接配置格式无效")
+	if !response.Bind(c, &p) {
 		return old, nil, false
 	}
 	if p.Name == "" || len([]rune(p.Name)) > 64 || (p.Type != "mysql" && p.Type != "mariadb") || (p.Network != "tcp" && p.Network != "unix") || p.Username == "" || len(p.Username) > 128 || strings.ContainsRune(p.Username, 0) {

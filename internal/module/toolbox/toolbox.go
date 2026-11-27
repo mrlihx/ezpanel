@@ -32,6 +32,7 @@ type Module struct {
 	tasks      *task.Manager
 	auth       *auth.Service
 	mu         sync.Mutex
+	swapMu     sync.Mutex
 	ipMu       sync.Mutex
 	ipTry      *ipTrial
 }
@@ -227,13 +228,6 @@ func (m *Module) read(c *gin.Context) {
 			e = json.Unmarshal([]byte(row.Value), &rows)
 			data = gin.H{"list": rows}
 		}
-	case "kernel":
-		rows := []gin.H{}
-		for _, p := range kernelParams {
-			b, err := os.ReadFile("/proc/sys/" + strings.ReplaceAll(p.Key, ".", "/"))
-			rows = append(rows, gin.H{"key": p.Key, "label": p.Label, "min": p.Min, "max": p.Max, "value": strings.TrimSpace(string(b)), "available": err == nil})
-		}
-		data = gin.H{"list": rows}
 	case "audit":
 		page, size, ok := response.Page(c, 100, 20)
 		if !ok {
@@ -278,7 +272,6 @@ type settingInput struct {
 	Content  string         `json:"content"`
 	Revision string         `json:"revision"`
 	List     []savedCommand `json:"list"`
-	Values   map[string]int `json:"values"`
 	Kind     string         `json:"kind"`
 	Provider string         `json:"provider"`
 	Enabled  bool           `json:"enabled"`
@@ -289,11 +282,17 @@ func (m *Module) save(c *gin.Context) {
 	if !response.Bind(c, &in) {
 		return
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	section := c.Param("section")
+	if section == "swap" {
+		m.swapMu.Lock()
+		defer m.swapMu.Unlock()
+	} else {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+	}
 	ctx := c.Request.Context()
 	var e error
-	switch c.Param("section") {
+	switch section {
 	case "dns":
 		if len(in.Servers) < 1 || len(in.Servers) > 2 {
 			response.Fail(c, response.Invalid, "请输入主 DNS 和可选备用 DNS")
@@ -407,8 +406,6 @@ func (m *Module) save(c *gin.Context) {
 		if e == nil {
 			e = m.db.Save(&store.Setting{Key: "toolbox.commands", Value: string(b)}).Error
 		}
-	case "kernel":
-		e = m.saveKernel(ctx, in.Values)
 	case "audit":
 		e = m.saveAudit(ctx, in.Enabled)
 	default:

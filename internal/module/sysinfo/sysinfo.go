@@ -161,6 +161,7 @@ type Module struct {
 	clients        map[chan Point]struct{}
 	previous       counters
 	auth           *auth.Service
+	ctx            context.Context
 	cancel         context.CancelFunc
 	done           chan struct{}
 	networkMu      sync.Mutex
@@ -172,7 +173,7 @@ type Module struct {
 
 func New(ctx context.Context, a *auth.Service) *Module {
 	ctx, cancel := context.WithCancel(ctx)
-	m := &Module{auth: a, cancel: cancel, done: make(chan struct{}), clients: make(map[chan Point]struct{})}
+	m := &Module{auth: a, ctx: ctx, cancel: cancel, done: make(chan struct{}), clients: make(map[chan Point]struct{})}
 	m.sample(ctx)
 	m.startPanelMetaLoop(ctx)
 	go func() {
@@ -219,7 +220,7 @@ func parseQuery(raw string) (string, int, error) {
 }
 func (m *Module) Routes(g *gin.RouterGroup) {
 	g.GET("/api/sysinfo/summary", m.summary)
-	g.GET("/api/sysinfo/history", m.historyPoints)
+	g.GET("/api/sysinfo/history", m.HistoryPoints)
 	g.GET("/api/sysinfo/network", m.networkList)
 	g.GET("/api/sysinfo/network/:pid", m.networkDetail)
 	g.GET("/api/sysinfo/processes/:pid", m.processDetail)
@@ -233,7 +234,7 @@ func (m *Module) Routes(g *gin.RouterGroup) {
 	g.GET("/api/sysinfo/processes", func(c *gin.Context) {
 		s, n, e := parseQuery(c.Request.URL.RawQuery)
 		if e != nil {
-			response.Fail(c, 1001, "排序或数量无效")
+			response.Fail(c, response.Invalid, "排序或数量无效")
 			return
 		}
 		m.mu.RLock()
@@ -464,13 +465,11 @@ func (m *Module) sample(ctx context.Context) {
 			}
 		}
 	}
-	if interfaces, e := netstat.InterfacesWithContext(ctx); e == nil {
-		for _, i := range interfaces {
-			for _, a := range i.Addrs {
-				o.IPs = append(o.IPs, a.Addr)
-			}
-		}
-	}
+	interfaces, _ := netstat.InterfacesWithContext(ctx)
+	m.panelMeta.mu.RLock()
+	publicIP := m.panelMeta.publicIP
+	m.panelMeta.mu.RUnlock()
+	o.IPs = serverIPAddresses(interfaces, publicIP, "/sys/class/net")
 	if stats, e := netstat.IOCountersWithContext(ctx, true); e == nil {
 		var up, down float64
 		var sent, recv uint64

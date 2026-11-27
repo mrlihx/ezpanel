@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"ezpanel/internal/executor"
 )
 
 var databasePorts = map[string]string{"mysql": "3306", "postgresql": "5432", "mongodb": "27017", "redis": "6379", "memcached": "11211"}
@@ -65,6 +67,17 @@ func (m *Manager) databaseContainers(ctx context.Context, id string) ([]database
 }
 
 func (m *Manager) DatabaseInstances(ctx context.Context, id string) ([]DatabaseInstance, error) {
+	rows, err := m.DatabaseInstanceSummaries(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		rows[i].UpdateVersion = m.containerUpdateVersion(ctx, id, rows[i].Version)
+	}
+	return rows, nil
+}
+
+func (m *Manager) DatabaseInstanceSummaries(ctx context.Context, id string) ([]DatabaseInstance, error) {
 	rows := []DatabaseInstance{}
 	if _, err := m.LookPath("docker"); err != nil {
 		return rows, nil
@@ -86,7 +99,6 @@ func (m *Manager) DatabaseInstances(ctx context.Context, id string) ([]DatabaseI
 			return nil, err
 		}
 		if row.ContainerID != "" {
-			row.UpdateVersion = m.containerUpdateVersion(ctx, id, row.Version)
 			rows = append(rows, row)
 		}
 	}
@@ -197,13 +209,24 @@ func (m *Manager) InstallDatabaseInstance(ctx context.Context, id, name, version
 		port := binding.Addr().(*net.TCPAddr).Port
 		_ = binding.Close()
 
-		instanceID := strings.ToLower(rand.Text())
 		if err := m.ensureAppParents(id); err != nil {
 			return err
 		}
-		root := m.databaseInstanceRoot(id, instanceID)
-		if err := ensurePublicTree(root); err != nil {
-			return err
+		prefix := "ezpanel-" + id + "-"
+		var container, instanceID, root string
+		for {
+			container, err = m.freeContainerName(ctx, prefix)
+			if err != nil {
+				return err
+			}
+			instanceID = strings.TrimPrefix(container, prefix)
+			root = m.databaseInstanceRoot(id, instanceID)
+			if err = os.Mkdir(root, 0755); !errors.Is(err, os.ErrExist) {
+				if err != nil {
+					return err
+				}
+				break
+			}
 		}
 		installed := false
 		defer func() {
@@ -211,6 +234,9 @@ func (m *Manager) InstallDatabaseInstance(ctx context.Context, id, name, version
 				_ = os.RemoveAll(root)
 			}
 		}()
+		if err := os.Chmod(root, 0755); err != nil {
+			return err
+		}
 		if name == "" {
 			name = Name(id) + " " + strconv.Itoa(port)
 		}
@@ -239,8 +265,10 @@ func (m *Manager) InstallDatabaseInstance(ctx context.Context, id, name, version
 			return err
 		}
 		args := append(bindings, m.databaseConfigMount(id, instanceID)...)
-		container := "ezpanel-" + id + "-" + instanceID
-		if err := m.createServiceContainer(ctx, []string{"run", "-d"}, container, release.Version, platform, args, reference, m.databaseConfigCommand(id, instanceID)); err != nil {
+		if err := m.createServiceContainer(ctx, []string{"create"}, container, release.Version, platform, args, reference, m.databaseConfigCommand(id, instanceID)); err != nil {
+			return err
+		}
+		if _, err := m.docker(ctx, time.Minute, "start", container); err != nil {
 			_, _ = m.docker(context.WithoutCancel(ctx), 20*time.Second, "rm", "-f", container)
 			return err
 		}
@@ -256,7 +284,7 @@ func (m *Manager) InstallDatabaseInstance(ctx context.Context, id, name, version
 	})
 }
 
-var databaseInstanceID = regexp.MustCompile(`^[a-z2-7]{26}$`)
+var databaseInstanceID = regexp.MustCompile(`^(?:[a-z2-7]{6}|[a-z2-7]{26})$`)
 
 func (m *Manager) DatabaseInstanceAction(ctx context.Context, id, instanceID, action string) error {
 	if !IsDatabaseContainer(id) || (instanceID != "default" && !databaseInstanceID.MatchString(instanceID)) {
@@ -300,6 +328,9 @@ func (m *Manager) DatabaseInstanceAction(ctx context.Context, id, instanceID, ac
 		}
 		args := []string{action, info.ID}
 		if action == "remove" {
+			if err := m.checkDatabaseInstanceEmpty(ctx, id, instanceID, info); err != nil {
+				return err
+			}
 			args = []string{"rm", "-f", info.ID}
 		}
 		_, err = m.docker(ctx, 60*time.Second, args...)
@@ -314,6 +345,72 @@ func (m *Manager) DatabaseInstanceAction(ctx context.Context, id, instanceID, ac
 		}
 		return err
 	})
+}
+
+func (m *Manager) checkDatabaseInstanceEmpty(ctx context.Context, engine, instanceID string, info containerInfo) error {
+	if engine == "memcached" {
+		return nil
+	}
+	if !info.State.Running || info.State.Status == "restarting" || info.State.Status == "paused" {
+		return errors.New("请先启动实例，确认其中没有数据库后再卸载")
+	}
+	failed := errors.New("无法检查实例中的数据库，请确认实例运行正常且管理凭据有效后重试")
+	args := []string{"exec"}
+	var probe []string
+	var env []string
+	switch engine {
+	case "mysql":
+		socket := "/var/run/mysqld/mysqld.sock"
+		if instanceID == "default" {
+			socket = m.MySQLSocket()
+		}
+		password, err := m.DatabaseInstancePassword(engine, instanceID)
+		if err != nil {
+			return failed
+		}
+		// 读取宿主机的最新凭据，避免密码文件被替换后容器仍挂载旧文件。
+		env = append(executor.DefaultEnv(), "MYSQL_PWD="+password)
+		args = append(args, "-e", "MYSQL_PWD")
+		probe = []string{"mysql", "--no-defaults", "--socket=" + socket, "-uroot", "-NBe",
+			`SELECT count(*) FROM information_schema.schemata WHERE BINARY schema_name NOT IN ('mysql','information_schema','performance_schema','sys')`}
+	case "postgresql":
+		probe = []string{"psql", "-XAtw", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c",
+			`SELECT count(*) FROM pg_catalog.pg_database WHERE NOT datistemplate AND datname <> 'postgres'`}
+	case "mongodb":
+		probe = []string{"mongosh", "--quiet", "--norc", "--eval", `
+const admin = db.getSiblingDB('admin');
+if (process.env.MONGO_INITDB_ROOT_USERNAME) {
+  admin.auth(process.env.MONGO_INITDB_ROOT_USERNAME, process.env.MONGO_INITDB_ROOT_PASSWORD);
+}
+const result = admin.runCommand({ listDatabases: 1, nameOnly: true, authorizedDatabases: false });
+print(result.databases.filter(({name}) => !['admin', 'config', 'local'].includes(name)).length);`}
+	case "redis":
+		probe = []string{"sh", "-ec", `REDISCLI_AUTH="$(cat /run/ezpanel-password)"
+export REDISCLI_AUTH
+exec redis-cli --raw -e INFO keyspace`}
+	}
+	docker, err := m.LookPath("docker")
+	if err != nil {
+		return failed
+	}
+	out, err := m.Run(ctx, 15*time.Second, env, docker, append(append(args, info.ID), probe...)...)
+	if err == nil {
+		result := strings.TrimSpace(out.Stdout)
+		if engine == "redis" {
+			if result == "# Keyspace" {
+				return nil
+			}
+			if strings.HasPrefix(result, "# Keyspace\r\n") || strings.HasPrefix(result, "# Keyspace\n") {
+				return errors.New("该实例仍有 Redis 数据，请先清空所有逻辑库中的键再卸载")
+			}
+		} else if count, err := strconv.Atoi(result); err == nil && count >= 0 {
+			if count == 0 {
+				return nil
+			}
+			return fmt.Errorf("该实例仍有 %d 个用户数据库，请先删除全部数据库再卸载实例", count)
+		}
+	}
+	return failed
 }
 
 func (m *Manager) DatabaseInstancePassword(id, instanceID string) (string, error) {

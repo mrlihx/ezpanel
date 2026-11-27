@@ -1,0 +1,81 @@
+.frp-settings-tabs > .ant-tabs-content-holder {
+  overflow: hidden;
+}
+.frp-settings-tabs > .ant-tabs-content-holder > .ant-tabs-content,
+.frp-settings-tabs
+  > .ant-tabs-content-holder
+  > .ant-tabs-content
+  > .ant-tabs-tabpane-active {
+  height: 100%;
+  min-height: 0;
+}
+
+.frp-service-content,
+.frp-configuration,
+.frp-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  height: 100%;
+}
+
+.frp-service-content {
+  overflow-y: auto;
+}
+
+.frp-service-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.frp-service-actions {
+  margin-top: 20px;
+}
+.frp-path {
+  overflow-wrap: anywhere;
+}
+.frp-configuration > .ant-tabs,
+.frp-logs > .ant-tabs {
+  flex: none;
+}
+.frp-editor {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.frp-visual-form {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-inline-end: 8px;
+}
+.frp-visual-form > .ant-form-item {
+  max-width: 840px;
+}
+.frp-visual-form .ant-input-number {
+  width: 180px;
+  max-width: 100%;
+}
+.frp-visual-form .ant-select {
+  max-width: 400px;
+}
+
+@media (max-width: 767px) {
+  .frp-visual-form .ant-form-item:has(.ant-table-wrapper) {
+    flex-direction: column;
+  }
+}
+
+.frp-configuration > :not(.frp-editor, .frp-visual-form),
+.frp-logs > .ant-tabs {
+  flex-shrink: 0;
+}
+.frp-config-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+.frp-logs .software-log-content {
+  overflow: hidden;
+}

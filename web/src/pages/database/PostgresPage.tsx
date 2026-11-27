@@ -1,5 +1,7 @@
+import ResourceActions, {
+  useResourceActions,
+} from '../../plugins/ResourceActions';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Alert,
   App,
@@ -50,11 +52,14 @@ import {
 import { formatSize } from '../../utils/format';
 import { LAYOUT, SPACING } from '../../styles/tokens';
 import DatabaseInstanceControl from './DatabaseInstanceControl';
+import DatabaseInstancesStatus from './DatabaseInstancesStatus';
 import DatabasePassword from './DatabasePassword';
 import ContentSizedTable from '../../components/ContentSizedTable';
+import ApplicationInstallGuide from '../../components/ApplicationInstallGuide';
 import InlineRemark from '../../components/InlineRemark';
 import LocalBackupsModal from '../../components/LocalBackupsModal';
 import { useRememberedTab } from '../../hooks/useRememberedTab';
+import { useDatabaseBatchActions } from './useDatabaseBatchActions';
 
 function generatePassword(length = 16): string {
   const chars =
@@ -398,7 +403,7 @@ function pgInstanceLabel(item: { id: string; name: string }) {
 }
 
 export default function PostgresPage() {
-  const navigate = useNavigate();
+  const pluginActions = useResourceActions('databases');
   const fixedActions = Grid.useBreakpoint().lg ? 'right' : undefined;
   const { message, modal } = App.useApp();
   const client = useQueryClient();
@@ -468,6 +473,12 @@ export default function PostgresPage() {
     },
   );
   const databasesFetching = dbQueries.some((q) => q.isFetching);
+  const databaseErrors = targetInstances.flatMap((instance, index) => {
+    const query = dbQueries[index];
+    return query?.error
+      ? [{ instance, error: query.error, retry: query.refetch }]
+      : [];
+  });
   const databasesUpdatedAt = dbQueries.reduce(
     (max, q) => Math.max(max, q.dataUpdatedAt),
     0,
@@ -522,6 +533,23 @@ export default function PostgresPage() {
     void instancesQuery.refetch();
     void client.invalidateQueries({ queryKey: ['pg-databases'] });
   };
+  const filteredDatabases = allDatabaseRows.filter((row) =>
+    row.name.toLowerCase().includes(keyword.trim().toLowerCase()),
+  );
+  const batch = useDatabaseBatchActions({
+    rows: filteredDatabases,
+    rowKey: (row) => row._key,
+    describe: (row) => `${row.name}（${row._instanceLabel}）`,
+    deleteNotice: '数据库及其数据将永久删除，请核对库名和所属实例。',
+    operate: (row, action) =>
+      action === 'backup'
+        ? pgCreateBackup(row._instanceId, row.name, true)
+        : pgDropDatabase(row._instanceId, row.name, true),
+    onChanged: () => {
+      void client.invalidateQueries({ queryKey: ['pg-databases'] });
+      void client.invalidateQueries({ queryKey: ['pg-backups'] });
+    },
+  });
 
   if (instancesQuery.isPending || selectionLoading) {
     return (
@@ -552,21 +580,14 @@ export default function PostgresPage() {
 
   if (!instances.length) {
     return (
-      <Card>
-        <Empty description="尚未安装 PostgreSQL 实例">
-          <Button type="primary" onClick={() => navigate('/apps/database')}>
-            前往应用商店安装 PostgreSQL
-          </Button>
-        </Empty>
-      </Card>
+      <ApplicationInstallGuide
+        name="PostgreSQL"
+        install="postgresql"
+        onDetect={refresh}
+      />
     );
   }
 
-  const filteredDatabases = allDatabaseRows.filter((row) =>
-    keyword.trim()
-      ? row.name.toLowerCase().includes(keyword.trim().toLowerCase())
-      : true,
-  );
   const anyRunning = instances.some((i) => i.running);
 
   return (
@@ -595,16 +616,28 @@ export default function PostgresPage() {
             >
               添加数据库
             </Button>
-            {!isAll && activeInstance && (
-              <DatabaseInstanceControl
-                key={activeInstance.id}
+            {isAll && instances.length > 1 ? (
+              <DatabaseInstancesStatus
                 engine="postgresql"
-                instanceId={activeInstance.id}
-                name={pgInstanceLabel(activeInstance)}
-                version={activeInstance.version}
-                running={activeInstance.running}
+                instances={instances.map((instance) => ({
+                  ...instance,
+                  instanceId: instance.id,
+                  name: pgInstanceLabel(instance),
+                }))}
                 onChanged={refresh}
               />
+            ) : (
+              activeInstance && (
+                <DatabaseInstanceControl
+                  key={activeInstance.id}
+                  engine="postgresql"
+                  instanceId={activeInstance.id}
+                  name={pgInstanceLabel(activeInstance)}
+                  version={activeInstance.version}
+                  running={activeInstance.running}
+                  onChanged={refresh}
+                />
+              )
             )}
           </Space>
           <Space wrap>
@@ -623,12 +656,16 @@ export default function PostgresPage() {
                 setInstanceId(v);
                 setExplorerDB(null);
                 setBackupDB(null);
+                batch.reset();
               }}
             />
             <Input.Search
               allowClear
               placeholder="请输入数据库名"
-              onSearch={setKeyword}
+              onSearch={(value) => {
+                setKeyword(value);
+                batch.reset();
+              }}
               style={{ width: LAYOUT.appSearchWidth, maxWidth: '100%' }}
             />
             <Tooltip title="刷新">
@@ -643,6 +680,30 @@ export default function PostgresPage() {
       </Card>
 
       <Card>
+        {!!databaseErrors.length && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: SPACING.md }}
+            message="部分 PostgreSQL 实例的数据库列表读取失败"
+            description={databaseErrors.map(({ instance, error }) => (
+              <div key={instance.id}>
+                {pgInstanceLabel(instance)}：{error.message}
+              </div>
+            ))}
+            action={
+              <Button
+                size="small"
+                loading={databasesFetching}
+                onClick={() => {
+                  for (const { retry } of databaseErrors) void retry();
+                }}
+              >
+                重试失败项
+              </Button>
+            }
+          />
+        )}
         {!isAll && !activeInstance?.running ? (
           <Alert
             type="warning"
@@ -655,11 +716,16 @@ export default function PostgresPage() {
             fillColumn="name"
             loading={databasesFetching}
             dataSource={filteredDatabases}
+            rowSelection={batch.rowSelection}
+            pagination={batch.pagination}
+            footer={batch.footer}
             locale={{
               emptyText: (
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description="暂无数据库"
+                  description={
+                    databaseErrors.length ? '未能获取完整列表' : '暂无数据库'
+                  }
                 />
               ),
             }}
@@ -668,6 +734,7 @@ export default function PostgresPage() {
                 key: 'name',
                 title: '数据库名',
                 dataIndex: 'name',
+                minWidth: 160,
                 width: 180,
                 ellipsis: true,
               },
@@ -675,6 +742,7 @@ export default function PostgresPage() {
                 key: 'username',
                 title: '用户名',
                 dataIndex: 'username',
+                minWidth: 132,
                 width: 150,
                 ellipsis: true,
                 render: (value: string | undefined, row) => {
@@ -689,6 +757,7 @@ export default function PostgresPage() {
               {
                 key: 'password',
                 title: '密码',
+                minWidth: 120,
                 width: 210,
                 render: (_, row) => (
                   <DatabasePassword
@@ -704,6 +773,7 @@ export default function PostgresPage() {
                 key: 'backups',
                 title: '备份',
                 dataIndex: 'backupCount',
+                minWidth: 102,
                 width: 120,
                 render: (v: number | undefined, row) => (
                   <Button
@@ -724,12 +794,14 @@ export default function PostgresPage() {
                 key: 'location',
                 title: '数据库位置',
                 dataIndex: '_instanceLabel',
+                minWidth: 132,
                 width: 160,
                 ellipsis: true,
               },
               {
                 key: 'remark',
                 title: '备注',
+                minWidth: 136,
                 width: 200,
                 render: (_, row) => (
                   <InlineRemark
@@ -752,6 +824,7 @@ export default function PostgresPage() {
               {
                 key: 'actions',
                 title: '操作',
+                minWidth: 128,
                 width: 180,
                 fixed: fixedActions,
                 render: (_, row) => (
@@ -791,10 +864,14 @@ export default function PostgresPage() {
                           okButtonProps: { danger: true },
                           onOk: async () => {
                             await pgDropDatabase(row._instanceId, row.name);
-                            client.setQueryData<PGDatabase[]>(
+                            client.setQueryData<{ list: PGDatabase[] }>(
                               ['pg-databases', row._instanceId],
-                              (rows) =>
-                                rows?.filter((item) => item.name !== row.name),
+                              (data) =>
+                                data && {
+                                  list: data.list.filter(
+                                    (item) => item.name !== row.name,
+                                  ),
+                                },
                             );
                             void message.success('数据库已删除');
                           },
@@ -803,6 +880,13 @@ export default function PostgresPage() {
                     >
                       删除
                     </Button>
+                    <ResourceActions
+                      items={pluginActions(
+                        row._instanceId,
+                        row.name,
+                        'postgresql',
+                      )}
+                    />
                   </Space>
                 ),
               },

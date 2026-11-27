@@ -7,7 +7,6 @@ import (
 	"ezpanel/internal/executor"
 	"ezpanel/internal/response"
 	"ezpanel/internal/task"
-	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -209,71 +208,6 @@ func (m *Module) saveRAM(ctx context.Context, size int) error {
 	return updateFstab("ramdisk", "ezpanel-tmpfs "+ramPath+" tmpfs size="+strconv.Itoa(size)+"M,mode=0755,nodev,nosuid,nofail 0 0")
 }
 
-type kernelParam struct {
-	Key, Label string
-	Min, Max   int
-}
-
-var kernelParams = []kernelParam{{"vm.swappiness", "交换倾向", 0, 200}, {"vm.vfs_cache_pressure", "目录与索引缓存回收倾向", 0, 1000}, {"net.core.somaxconn", "监听队列上限", 128, 65535}, {"net.ipv4.tcp_fin_timeout", "FIN 等待秒数", 5, 600}, {"net.ipv4.tcp_keepalive_time", "TCP 保活空闲秒数", 60, 86400}, {"fs.file-max", "系统文件句柄上限", 1024, 100000000}}
-
-func (m *Module) saveKernel(ctx context.Context, values map[string]int) error {
-	if len(values) == 0 || len(values) > len(kernelParams) {
-		return errors.New("请选择需要修改的内核参数")
-	}
-	for key, value := range values {
-		valid := false
-		for _, p := range kernelParams {
-			if p.Key == key && value >= p.Min && value <= p.Max {
-				valid = true
-			}
-		}
-		if !valid {
-			return fmt.Errorf("内核参数 %s 或取值不支持", key)
-		}
-	}
-	old := map[string]string{}
-	for key := range values {
-		b, e := os.ReadFile("/proc/sys/" + strings.ReplaceAll(key, ".", "/"))
-		if e != nil {
-			return e
-		}
-		old[key] = strings.TrimSpace(string(b))
-	}
-	rollback := func() {
-		for key, value := range old {
-			command(ctx, "sysctl", "-w", key+"="+value)
-		}
-	}
-	for key, value := range values {
-		if _, e := command(ctx, "sysctl", "-w", key+"="+strconv.Itoa(value)); e != nil {
-			rollback()
-			return e
-		}
-	}
-	// 保留本工具之前保存但本次未修改的条目。
-	existing, _ := os.ReadFile("/etc/sysctl.d/90-ezpanel.conf")
-	saved := map[string]string{}
-	for _, line := range strings.Split(string(existing), "\n") {
-		key, value, ok := strings.Cut(line, "=")
-		if ok {
-			saved[strings.TrimSpace(key)] = strings.TrimSpace(value)
-		}
-	}
-	for key, value := range values {
-		saved[key] = strconv.Itoa(value)
-	}
-	lines := []string{}
-	for _, p := range kernelParams {
-		if value, ok := saved[p.Key]; ok {
-			lines = append(lines, p.Key+" = "+value)
-		}
-	}
-	if e := writeConfig("/etc/sysctl.d/90-ezpanel.conf", []byte(strings.Join(lines, "\n")+"\n"), 0644); e != nil {
-		rollback()
-		return e
-	}
-	return nil
-}
 func (m *Module) saveAudit(ctx context.Context, enabled bool) error {
 	args := []string{"-a", "always,exit", "-F", "arch=b64", "-S", "execve,execveat", "-k", "ezpanel-command"}
 	text := ""

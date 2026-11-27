@@ -30,6 +30,8 @@ import (
 
 var errStorage = errors.New("网站数据读取或保存失败")
 
+type siteToggleValidationError struct{ error }
+
 type Module struct {
 	trafficMu sync.Mutex
 	traffic   map[string]*siteTraffic
@@ -482,27 +484,38 @@ func (m *Module) toggle(c *gin.Context) {
 		return
 	}
 	defer release()
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	row, ok := m.row(c)
-	if !ok {
-		return
-	}
-	old := row
-	row.Enabled = strings.HasSuffix(c.FullPath(), "/enable")
-	if row.Enabled && row.RuntimeEnvironment != "" && row.RuntimeCommand == "" {
-		response.Fail(c, response.Invalid, "请先在运行设置中保存启动配置")
-		return
-	}
-	if e = m.validateSites(row); e != nil {
-		response.Fail(c, response.Invalid, e.Error())
-		return
-	}
-	if e = m.changeProject(c.Request.Context(), &row, old, false, func() error { return m.db.Save(&row).Error }); e != nil {
-		failure(c, e)
+	row, e := m.SetSiteEnabled(c.Request.Context(), c.Param("id"), strings.HasSuffix(c.FullPath(), "/enable"))
+	if e != nil {
+		if invalid, ok := e.(siteToggleValidationError); ok {
+			response.Fail(c, response.Invalid, invalid.Error())
+		} else {
+			failure(c, e)
+		}
 		return
 	}
 	response.OK(c, m.view(row, m.running(c.Request.Context())))
+}
+
+// SetSiteEnabled 由面板和插件共用。调用方先取得网站任务锁。
+func (m *Module) SetSiteEnabled(ctx context.Context, id string, enabled bool) (store.Website, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var row store.Website
+	if err := m.db.WithContext(ctx).First(&row, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return row, err
+		}
+		return row, errStorage
+	}
+	old := row
+	row.Enabled = enabled
+	if row.Enabled && row.RuntimeEnvironment != "" && row.RuntimeCommand == "" {
+		return row, siteToggleValidationError{errors.New("请先在运行设置中保存启动配置")}
+	}
+	if err := m.validateSites(row); err != nil {
+		return row, siteToggleValidationError{err}
+	}
+	return row, m.changeProject(ctx, &row, old, false, func() error { return m.db.Save(&row).Error })
 }
 func (m *Module) ssl(c *gin.Context) {
 	var in struct {

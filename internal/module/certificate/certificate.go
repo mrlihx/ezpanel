@@ -32,21 +32,26 @@ import (
 )
 
 type Module struct {
-	db            *gorm.DB
-	cfg           config.Config
-	tasks         *task.Manager
-	auth          *auth.Service
-	accountMu     sync.Mutex
-	prepareHTTP   func(context.Context, string, []string) (string, error)
-	deployRenewal func(context.Context, string) error
+	db              *gorm.DB
+	cfg             config.Config
+	tasks           *task.Manager
+	auth            *auth.Service
+	accountMu       sync.Mutex
+	prepareHTTP     func(context.Context, string, []string) (string, func(), error)
+	deployRenewal   func(context.Context, string) error
+	renewalFinished func(certID, siteID, taskID, status string)
+	dnsProviders    DNSProviders
 }
 
-func New(db *gorm.DB, cfg config.Config, tasks *task.Manager, a *auth.Service, prepareHTTP func(context.Context, string, []string) (string, error)) *Module {
+func New(db *gorm.DB, cfg config.Config, tasks *task.Manager, a *auth.Service, prepareHTTP func(context.Context, string, []string) (string, func(), error)) *Module {
 	return &Module{db: db, cfg: cfg, tasks: tasks, auth: a, prepareHTTP: prepareHTTP}
 }
 func (m *Module) Name() string { return "certificate" }
 func (m *Module) SetRenewalDeployer(deploy func(context.Context, string) error) {
 	m.deployRenewal = deploy
+}
+func (m *Module) SetRenewalFinished(fn func(certID, siteID, taskID, status string)) {
+	m.renewalFinished = fn
 }
 func (m *Module) Routes(g *gin.RouterGroup) {
 	r := g.Group("/api/certificates")
@@ -56,13 +61,19 @@ func (m *Module) Routes(g *gin.RouterGroup) {
 	r.POST("/orders", m.createOrder)
 	r.GET("/orders/:id", m.order)
 	r.POST("/orders/:id/complete", m.completeOrder)
+	r.POST("/orders/:id/cancel", m.cancelOrder)
 	r.POST("/orders/:id/deploy", m.retryDeployment)
 	r.GET("/:id", m.detail)
 	r.DELETE("/:id", m.delete)
 	r.GET("/:id/download", m.download)
 }
+var errInvalidCertificate = errors.New("invalid certificate")
+
 func fail(c *gin.Context, err error) {
 	code := response.System
+	if errors.Is(err, errInvalidCertificate) {
+		code = response.Invalid
+	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		code = response.NotFound
 	}
@@ -105,19 +116,19 @@ func certificateAlgorithm(row store.Certificate) string {
 func Store(db *gorm.DB, cfg config.Config, cert, key, source, method, email, replaceID string) (store.Certificate, error) {
 	var row store.Certificate
 	if len(cert) > 1<<20 || len(key) > 64<<10 {
-		return row, errors.New("证书或私钥过大")
+		return row, fmt.Errorf("%w: 证书或私钥过大", errInvalidCertificate)
 	}
 	pair, err := tls.X509KeyPair([]byte(cert), []byte(key))
 	if err != nil || len(pair.Certificate) == 0 {
-		return row, errors.New("证书与私钥不匹配或格式无效")
+		return row, fmt.Errorf("%w: 证书与私钥不匹配或格式无效", errInvalidCertificate)
 	}
 	leaf, err := x509.ParseCertificate(pair.Certificate[0])
 	if err != nil {
-		return row, err
+		return row, fmt.Errorf("%w: %v", errInvalidCertificate, err)
 	}
 	now := time.Now().UTC()
 	if now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) {
-		return row, errors.New("证书尚未生效或已过期")
+		return row, fmt.Errorf("%w: 证书尚未生效或已过期", errInvalidCertificate)
 	}
 	fingerprint := sha256.Sum256(leaf.Raw)
 	digest := hex.EncodeToString(fingerprint[:])
@@ -287,7 +298,7 @@ func (m *Module) download(c *gin.Context) {
 	var site store.Website
 	query := m.db.Where("certificate_id = ?", row.ID).Order("id")
 	if id := c.Query("siteId"); id != "" {
-		query = m.db.Where("id = ?", id)
+		query = query.Where("id = ?", id)
 	}
 	err := query.First(&site).Error
 	if err == nil {

@@ -128,11 +128,6 @@ export const saveComposeTemplate = (data: ComposeTemplateInput, id?: string) =>
   );
 export const deleteComposeTemplate = (id: string) =>
   request(`${composeTemplatePath}/${id}`, { method: 'DELETE' });
-export const deployComposeTemplate = (id: string, project: string) =>
-  request<{ taskId: string }>(`${composeTemplatePath}/${id}/deploy`, {
-    method: 'POST',
-    data: { project },
-  });
 export const importComposeTemplate = (data: {
   format: ComposeTemplateFormat;
   name: string;

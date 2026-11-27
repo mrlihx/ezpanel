@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"io"
 	"math"
 	"net/http"
@@ -25,18 +26,84 @@ import (
 )
 
 type Module struct {
-	db       *gorm.DB
-	cfg      config.Config
-	tasks    *task.Manager
-	packages *pkgmgr.Manager
-	auth     *auth.Service
-	client   *http.Client
+	db              *gorm.DB
+	cfg             config.Config
+	tasks           *task.Manager
+	packages        *pkgmgr.Manager
+	auth            *auth.Service
+	client          *http.Client
+	deploymentHooks func(context.Context, string, string, string, *task.Log) error
 }
 
 func New(db *gorm.DB, cfg config.Config, tasks *task.Manager, packages *pkgmgr.Manager, a *auth.Service) *Module {
-	return &Module{db, cfg, tasks, packages, a, engineClient()}
+	return &Module{db: db, cfg: cfg, tasks: tasks, packages: packages, auth: a, client: engineClient()}
 }
 func (m *Module) Name() string { return "docker" }
+
+func (m *Module) PluginContainerControl(ctx context.Context, id, action string) error {
+	return m.json(ctx, "POST", "/containers/"+id+"/"+action, nil, nil)
+}
+
+func (m *Module) PluginContainerStats(ctx context.Context, id string) (json.RawMessage, error) {
+	var out json.RawMessage
+	err := m.json(ctx, "GET", "/containers/"+id+"/stats?stream=false", nil, &out)
+	return out, err
+}
+
+func (m *Module) PluginContainerLogs(ctx context.Context, id string, lines int, since, until string) (string, error) {
+	params := url.Values{"stdout": {"true"}, "stderr": {"true"}, "timestamps": {"true"}, "tail": {strconv.Itoa(lines)}}
+	if since != "" {
+		params.Set("since", since)
+	}
+	if until != "" {
+		params.Set("until", until)
+	}
+	res, err := m.call(ctx, "GET", "/containers/"+id+"/logs?"+params.Encode(), nil, "")
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+	return readOutput(res.Body)
+}
+
+type PluginContainer struct{ ID, Name, Image, Status, Database, Version string }
+
+// 插件只读取容器概要，环境变量、挂载和标签原文不出模块。
+func (m *Module) PluginContainers(ctx context.Context) ([]PluginContainer, error) {
+	if _, err := m.packages.LookPath("docker"); err != nil {
+		return nil, nil
+	}
+	var rows []struct {
+		ID, Image, State string
+		Names            []string
+		Labels           map[string]string
+	}
+	if err := m.json(ctx, "GET", "/containers/json?all=true", nil, &rows); err != nil {
+		return nil, err
+	}
+	out := make([]PluginContainer, 0, len(rows))
+	for _, row := range rows {
+		name := row.ID
+		if len(row.Names) > 0 {
+			name = strings.TrimPrefix(row.Names[0], "/")
+		}
+		engine := ""
+		if row.Labels["ezpanel.managed"] == "true" {
+			engine = row.Labels["ezpanel.database"]
+			if engine == "" {
+				engine = strings.TrimPrefix(name, "ezpanel-")
+			}
+			if !pkgmgr.IsDatabaseContainer(engine) {
+				engine = ""
+			}
+			if instance := row.Labels["ezpanel.instance-name"]; engine != "" && instance != "" {
+				name = instance
+			}
+		}
+		out = append(out, PluginContainer{ID: row.ID, Name: name, Image: row.Image, Status: row.State, Database: engine, Version: row.Labels["ezpanel.version"]})
+	}
+	return out, nil
+}
 
 var resourceName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,255}$`)
 
@@ -432,6 +499,24 @@ func (m *Module) removeContainer(c *gin.Context) {
 		return
 	}
 	defer release()
+	var info struct {
+		Name   string
+		Config struct{ Labels map[string]string }
+	}
+	if err := m.json(c.Request.Context(), "GET", "/containers/"+id+"/json", nil, &info); err != nil {
+		fail(c, err)
+		return
+	}
+	if info.Config.Labels["ezpanel.managed"] == "true" {
+		engine := info.Config.Labels["ezpanel.database"]
+		if engine == "" {
+			engine = strings.TrimPrefix(info.Name, "/ezpanel-")
+		}
+		if pkgmgr.IsDatabaseContainer(engine) && engine != "memcached" {
+			response.Fail(c, response.Invalid, "请到应用商店的实例管理中检查数据库并卸载实例")
+			return
+		}
+	}
 	path := "/containers/" + id + "?v=false&force=" + strconv.FormatBool(c.Query("force") == "true")
 	if err := m.json(c.Request.Context(), "DELETE", path, nil, nil); err != nil {
 		fail(c, err)
@@ -572,6 +657,15 @@ func (m *Module) search(c *gin.Context) {
 	}
 	m.read(c, "/images/search?limit=30&term="+url.QueryEscape(term))
 }
+
+// Docker Engine 的拉取 API 会把没有标签或摘要的引用视为拉取所有标签。
+func imagePullReference(image string) string {
+	if !strings.ContainsRune(image, '@') && !strings.ContainsRune(image[strings.LastIndexByte(image, '/')+1:], ':') {
+		return image + ":latest"
+	}
+	return image
+}
+
 func (m *Module) imageTransfer(c *gin.Context) {
 	var in struct {
 		Image      string `json:"image"`
@@ -590,10 +684,13 @@ func (m *Module) imageTransfer(c *gin.Context) {
 		return
 	}
 	action := "pull"
-	path := "/images/create?fromImage=" + url.QueryEscape(in.Image)
+	var path string
 	if strings.HasSuffix(c.FullPath(), "/push") {
 		action = "push"
 		path = "/images/" + url.PathEscape(in.Image) + "/push"
+	} else {
+		in.Image = imagePullReference(in.Image)
+		path = "/images/create?fromImage=" + url.QueryEscape(in.Image)
 	}
 	session := auth.Current(c)
 	taskID, err := m.tasks.Submit(task.Meta{Module: "docker", Action: action, ResourceID: in.Image, Target: in.Image, LockKey: "docker:image:" + in.Image, Username: session.User.Username, IP: m.auth.ClientIP(c)}, func(ctx context.Context, log *task.Log) (any, error) {
@@ -704,19 +801,31 @@ func (m *Module) createVolume(c *gin.Context) {
 }
 func (m *Module) prune(c *gin.Context) {
 	kind := c.Param("kind")
+	path := "/" + kind + "/prune"
+	var filters string
 	switch kind {
-	case "containers", "images", "networks", "volumes":
+	case "images":
+		switch c.Query("scope") {
+		case "", "dangling":
+			filters = `{"dangling":["true"]}`
+		case "unused":
+			filters = `{"dangling":["false"]}`
+		default:
+			response.Fail(c, response.Invalid, "镜像清理范围无效")
+			return
+		}
+	case "volumes":
+		filters = `{"all":["true"]}`
+	case "containers":
+		m.pruneStandaloneContainers(c)
+		return
+	case "networks":
 	default:
 		response.Fail(c, response.Invalid, "清理类型无效")
 		return
 	}
-	path := "/" + kind + "/prune"
-	if kind == "volumes" {
-		path += "?filters=" + url.QueryEscape(`{"all":["true"]}`)
-	}
-	if kind == "containers" {
-		m.pruneStandaloneContainers(c)
-		return
+	if filters != "" {
+		path += "?filters=" + url.QueryEscape(filters)
 	}
 	var out any
 	if err := m.json(c.Request.Context(), "POST", path, nil, &out); err != nil {

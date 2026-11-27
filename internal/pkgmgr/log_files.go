@@ -44,7 +44,15 @@ func (m *Manager) LogSources(ctx context.Context, id string) ([]LogSource, error
 	add := func(key, name, path string) {
 		out = append(out, LogSource{ID: key, Name: name, Path: path, Clearable: true})
 	}
-	content, _ := m.ReadFile(m.configPath(id))
+	cfgPath := m.configPath(id)
+	if cfgPath == "" && isHostTool(id) {
+		paths := hostToolConfigs[id][""]
+		cfgPath = paths[0]
+		if state.PkgManager != "apt-get" {
+			cfgPath = paths[1]
+		}
+	}
+	content, _ := m.ReadFile(cfgPath)
 	settings := Settings{Content: string(content)}
 	values := map[string]string{}
 	for _, line := range strings.Split(settings.Content, "\n") {
@@ -53,10 +61,28 @@ func (m *Manager) LogSources(ctx context.Context, id string) ([]LogSource, error
 			continue
 		}
 		if key, value, ok := strings.Cut(line, "="); ok {
-			values[strings.ReplaceAll(strings.TrimSpace(key), "_", "-")] = strings.Trim(strings.TrimSpace(value), "\"'")
+			norm := strings.ReplaceAll(strings.TrimSpace(key), "_", "-")
+			norm = strings.ReplaceAll(norm, " ", "-")
+			values[norm] = strings.Trim(strings.TrimSpace(value), "\"'")
 		}
 	}
 	switch id {
+	case "frp":
+		services, err := m.FRPServices(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, service := range services {
+			if service.Installed {
+				add(service.Role, service.Role+" 日志", service.LogPath)
+			}
+		}
+	case "supervisor":
+		snapshot, err := m.SupervisorSnapshot(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, supervisorLogSources(snapshot)...)
 	case "ftp":
 		if values, err := m.ftpValues(state); err == nil {
 			if _, file, ok := strings.Cut(values["AltLog"], ":"); ok && filepath.IsAbs(file) {
@@ -221,13 +247,28 @@ func (m *Manager) DatabaseLogSources(_ context.Context, app string, instance Dat
 func (m *Manager) ReadContainerLog(ctx context.Context, name string) (executor.Result, error) {
 	result, err := m.docker(ctx, 15*time.Second, "logs", "--timestamps", "--tail", "1000", name)
 	if err == nil && result.Stderr != "" {
-		lines := strings.Split(strings.TrimSuffix(result.Stdout+result.Stderr, "\n"), "\n")
+		var lines []string
+		for _, stream := range []string{result.Stdout, result.Stderr} {
+			if stream == "" {
+				continue
+			}
+			for _, line := range strings.Split(strings.TrimSuffix(stream, "\n"), "\n") {
+				if line != "" {
+					lines = append(lines, line)
+				}
+			}
+		}
 		slices.SortStableFunc(lines, func(a, b string) int {
 			first, _, _ := strings.Cut(a, " ")
 			second, _, _ := strings.Cut(b, " ")
 			return strings.Compare(first, second)
 		})
-		result.Stdout, result.Stderr = strings.Join(lines, "\n")+"\n", ""
+		if len(lines) > 0 {
+			result.Stdout = strings.Join(lines, "\n") + "\n"
+		} else {
+			result.Stdout = ""
+		}
+		result.Stderr = ""
 	}
 	return result, err
 }

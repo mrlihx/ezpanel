@@ -51,7 +51,7 @@ export function useLogScroll<T extends HTMLElement>(
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchmove', onTouchMove);
     };
-  });
+  }, [lockTouch, enabled, content]);
 
   useEffect(() => {
     return () => {

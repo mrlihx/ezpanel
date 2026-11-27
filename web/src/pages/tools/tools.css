@@ -1,0 +1,65 @@
+.tools-ip-settings {
+  display: grid;
+  gap: 24px;
+}
+
+.tools-page-audit {
+  display: flex;
+  flex-direction: column;
+  height: var(--panel-content-height, 100dvh);
+  max-height: var(--panel-content-height, 100dvh);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tools-page-audit > .section-tabs-host,
+.tools-page-audit > .section-tabs-host > .section-tabs,
+.tools-page-audit .section-tabs > .ant-tabs-content-holder,
+.tools-page-audit .section-tabs > .ant-tabs-content-holder > .ant-tabs-content,
+.tools-page-audit
+  .section-tabs
+  > .ant-tabs-content-holder
+  > .ant-tabs-content
+  > .ant-tabs-tabpane-active,
+.tools-page-audit .ant-tabs-tabpane-active > .ant-card,
+.tools-page-audit .ant-tabs-tabpane-active > .ant-card > .ant-card-body,
+.tools-audit-body,
+.tool-audit-panel,
+.tool-audit-tabs,
+.tool-audit-tabs > .ant-tabs-content-holder,
+.tool-audit-tabs > .ant-tabs-content-holder > .ant-tabs-content,
+.tool-audit-tabs
+  > .ant-tabs-content-holder
+  > .ant-tabs-content
+  > .ant-tabs-tabpane-active {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.tools-audit-body,
+.tool-audit-panel {
+  gap: 16px;
+}
+.tool-audit-tabs > .ant-tabs-content-holder {
+  overflow: auto;
+}
+.tool-audit-tabs .panel-log-box-host {
+  flex: 1;
+  min-height: 120px;
+}
+.tool-audit-tabs .tool-audit-output {
+  height: 100%;
+  max-height: 100%;
+}
+.tools-page-audit .section-tabs > .ant-tabs-nav,
+.tool-audit-tabs > .ant-tabs-nav {
+  flex-shrink: 0;
+}
+
+@media (max-width: 767px) {
+  .tools-ip-settings {
+    gap: 16px;
+  }
+}

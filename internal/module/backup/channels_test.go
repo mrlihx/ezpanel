@@ -167,3 +167,76 @@ func TestWebDAVUploadsAndDeletesWithinTargetDirectories(t *testing.T) {
 		t.Fatalf("远程对象清理范围错误: %v", files)
 	}
 }
+
+func TestFTPAndSFTPChannelAddressFields(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	storage := channelStorage{key: key}
+	for _, tc := range []struct {
+		protocol, address, want string
+		port                    int
+	}{
+		{"ftp", "backup.example/archives", "ftp://backup.example:21/archives", 0},
+		{"sftp", "192.0.2.5/backup", "sftp://192.0.2.5:2222/backup", 2222},
+		{"sftp", "2001:db8::1", "sftp://[2001:db8::1]:22", 0},
+	} {
+		t.Run(tc.protocol+tc.address, func(t *testing.T) {
+			target, err := storage.draft(channelInput{Name: "备份", Protocol: tc.protocol, Endpoint: tc.address, Port: tc.port, Username: "account", Password: "secret"}, backupChannel{})
+			if err != nil || target.Endpoint != tc.want {
+				t.Fatalf("地址规范化失败：%q, %v", target.Endpoint, err)
+			}
+			view := target.backupChannel.view()
+			if strings.Contains(view.Endpoint, "://") || view.Port == 0 {
+				t.Fatalf("界面地址未拆分：%+v", view)
+			}
+		})
+	}
+	secret, _ := store.Encrypt(key, "saved-password")
+	old := backupChannel{ID: "existing", Name: "备份", Protocol: "sftp", Endpoint: "sftp://backup.example/backup", Username: "account", Secret: secret, Fingerprint: "SHA256:saved"}
+	target, err := storage.draft(channelInput{Name: old.Name, Protocol: old.Protocol, Endpoint: "backup.example/backup", Port: 22, Username: old.Username}, old)
+	if err != nil || target.password != "saved-password" || target.Fingerprint != old.Fingerprint {
+		t.Fatalf("编辑未保留已有密码和主机公钥：%v", err)
+	}
+	target, err = storage.draft(channelInput{Name: old.Name, Protocol: old.Protocol, Endpoint: "backup.example/backup", Port: 22, Username: old.Username, Password: "new-password"}, old)
+	if err != nil || target.Fingerprint != "" {
+		t.Fatalf("重新填写凭据后未允许重新确认主机：%v", err)
+	}
+	if _, err := storage.draft(channelInput{Name: "备份", Protocol: "ftp", Endpoint: "backup.example", Port: 65536, Username: "account"}, backupChannel{}); err == nil {
+		t.Fatal("未拒绝无效端口")
+	}
+}
+
+func TestBackupChannelDirectoryFields(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	storage := channelStorage{key: key}
+	for _, protocol := range []string{"ftp", "sftp"} {
+		t.Run(protocol, func(t *testing.T) {
+			directory := "/备份/weekly archives"
+			target, err := storage.draft(channelInput{Name: "备份", Protocol: protocol, Endpoint: "backup.example", Port: 2022, Directory: &directory, Username: "account", Password: "secret"}, backupChannel{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if target.remotePath("database/demo.sql.gz") != directory+"/database/demo.sql.gz" {
+				t.Fatal("传输路径未使用独立备份目录")
+			}
+			view := target.backupChannel.view()
+			if view.Endpoint != "backup.example" || view.Directory != directory || view.Port != 2022 {
+				t.Fatalf("服务器与目录回显错误：%+v", view)
+			}
+			secret, err := store.Encrypt(key, target.password)
+			if err != nil {
+				t.Fatal(err)
+			}
+			row := target.backupChannel
+			row.Secret = secret
+			saved, err := storage.openTarget(row)
+			if err != nil || saved.remotePath("") != directory {
+				t.Fatalf("保存后的渠道目录错误：%v", err)
+			}
+			for _, invalid := range []string{"", "relative/backup", "/backup\nother"} {
+				if _, err := storage.draft(channelInput{Name: "备份", Protocol: protocol, Endpoint: "backup.example", Directory: &invalid, Username: "account"}, backupChannel{}); err == nil {
+					t.Fatalf("未拒绝无效目录 %q", invalid)
+				}
+			}
+		})
+	}
+}

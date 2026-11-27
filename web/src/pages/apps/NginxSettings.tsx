@@ -67,14 +67,12 @@ export default function NginxSettings({
   control,
   uninstall,
   onClose,
-  switchVersion,
 }: {
   app: Application;
   busy: boolean;
   control: (action: 'start' | 'stop' | 'restart' | 'reload') => void;
   uninstall: () => void;
   onClose: () => void;
-  switchVersion: () => void;
 }) {
   const { message, modal } = App.useApp();
   const screens = Grid.useBreakpoint();
@@ -446,40 +444,6 @@ export default function NginxSettings({
                     </>
                   )
                 )}
-              </Space>
-            ),
-          },
-          {
-            key: 'version',
-            label: '版本切换',
-            disabled: !app.manageable,
-            children: (
-              <Space direction="vertical" size={SPACING.lg} style={stack}>
-                <Descriptions
-                  column={1}
-                  items={[
-                    {
-                      key: 'version',
-                      label: '当前版本',
-                      children: app.version ?? '未识别',
-                    },
-                    {
-                      key: 'source',
-                      label: '安装来源',
-                      children: app.pkgManager,
-                    },
-                  ]}
-                />
-                <Typography.Paragraph type="secondary">
-                  选择目标版本和下载源后，在后台执行版本切换。配置和站点数据保留，过程可能短暂中断服务，可在消息盒子查看任务进度。
-                </Typography.Paragraph>
-                <Button
-                  type="primary"
-                  disabled={busy || saving || dirty || performanceDirty}
-                  onClick={switchVersion}
-                >
-                  选择版本
-                </Button>
               </Space>
             ),
           },

@@ -1,0 +1,106 @@
+.hardening-page {
+  min-width: 0;
+}
+.hardening-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 16px;
+}
+.hardening-switch-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hardening-switch-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.hardening-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  margin-bottom: 24px;
+}
+.hardening-summary strong {
+  margin-right: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.hardening-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.hardening-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.hardening-toolbar .ant-select {
+  min-width: 140px;
+}
+.hardening-toolbar .ant-input-affix-wrapper {
+  width: 280px;
+  margin-left: auto;
+}
+.hardening-path {
+  overflow-wrap: anywhere;
+}
+.hardening-table-detail {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  white-space: normal;
+}
+.hardening-overview-notes {
+  margin-top: 24px;
+}
+.hardening-overview-notes .ant-typography:last-child {
+  margin-bottom: 0;
+}
+.hardening-rule-form .ant-input-number {
+  width: 100%;
+}
+.hardening-rule-form .ant-alert {
+  margin-bottom: 20px;
+}
+@media (max-width: 767px) {
+  .hardening-switch-row {
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .hardening-toolbar .ant-select {
+    flex: 1;
+  }
+  .hardening-toolbar .ant-input-affix-wrapper {
+    width: 100%;
+    margin-left: 0;
+  }
+  .hardening-summary {
+    gap: 12px 20px;
+  }
+}
+
+.hardening-mode-select {
+  min-width: 130px;
+}
+
+.hardening-rule-form {
+  --application-setting-label-width: clamp(96px, 28%, 152px);
+}
+.hardening-rule-form.ant-form-horizontal .ant-form-item-row {
+  flex-direction: row;
+  flex-wrap: nowrap;
+}
+.hardening-rule-form.ant-form-horizontal .ant-form-item-label {
+  flex: 0 0 var(--application-setting-label-width) !important;
+  padding-bottom: 0;
+  text-align: left;
+}

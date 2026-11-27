@@ -259,11 +259,16 @@ export default function Session({
       if (event.data instanceof ArrayBuffer)
         terminal.write(new Uint8Array(event.data));
       else {
-        const frame = JSON.parse(event.data) as {
-          type: string;
-          code?: number;
-          warning?: string;
-        };
+        let frame: { type: string; code?: number; warning?: string };
+        try {
+          frame = JSON.parse(event.data) as {
+            type: string;
+            code?: number;
+            warning?: string;
+          };
+        } catch {
+          return;
+        }
         if (frame.type === 'ready') {
           if (frame.warning) {
             terminal.write(`\x1b[33m[安全提示] ${frame.warning}\x1b[0m\r\n`);

@@ -80,7 +80,7 @@ func loginShell() string {
 func (m *Module) socket(c *gin.Context) {
 	q, err := url.ParseQuery(c.Request.URL.RawQuery)
 	if err != nil {
-		response.Fail(c, 1001, "终端参数无效")
+		response.Fail(c, response.Invalid, "终端参数无效")
 		return
 	}
 	cols, rows := 80, 24
@@ -88,20 +88,20 @@ func (m *Module) socket(c *gin.Context) {
 		cols, err = strconv.Atoi(q.Get("cols"))
 	}
 	if err != nil {
-		response.Fail(c, 1001, "终端参数无效")
+		response.Fail(c, response.Invalid, "终端参数无效")
 		return
 	}
 	if q.Has("rows") {
 		rows, err = strconv.Atoi(q.Get("rows"))
 	}
 	if err != nil || cols < 1 || cols > 500 || rows < 1 || rows > 300 {
-		response.Fail(c, 1001, "终端尺寸无效")
+		response.Fail(c, response.Invalid, "终端尺寸无效")
 		return
 	}
 	cwd, hostID := q.Get("cwd"), q.Get("hostId")
 	if hostID != "" {
 		if _, err := hex.DecodeString(hostID); len(hostID) != 32 || err != nil || cwd != "" {
-			response.Fail(c, 1001, "SSH 主机参数无效")
+			response.Fail(c, response.Invalid, "SSH 主机参数无效")
 			return
 		}
 	} else {
@@ -110,12 +110,12 @@ func (m *Module) socket(c *gin.Context) {
 		}
 		info, statErr := os.Stat(cwd)
 		if !filepath.IsAbs(cwd) || statErr != nil || !info.IsDir() {
-			response.Fail(c, 1001, "终端工作目录无效（默认目录 /root 必须存在）")
+			response.Fail(c, response.Invalid, "终端工作目录无效（默认目录 /root 必须存在）")
 			return
 		}
 		cwd, err = filepath.EvalSymlinks(cwd)
 		if err != nil {
-			response.Fail(c, 1001, "工作目录不可用")
+			response.Fail(c, response.Invalid, "工作目录不可用")
 			return
 		}
 	}
@@ -124,7 +124,7 @@ func (m *Module) socket(c *gin.Context) {
 	m.mu.Lock()
 	if m.closed || m.active[username] >= 5 {
 		m.mu.Unlock()
-		response.Fail(c, 1005, "最多同时连接5个终端")
+		response.Fail(c, response.Conflict, "最多同时连接5个终端")
 		return
 	}
 	m.active[username]++

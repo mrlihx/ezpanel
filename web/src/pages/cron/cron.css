@@ -6,14 +6,6 @@
   width: 260px;
 }
 
-.cron-log-summary {
-  margin-bottom: 16px;
-}
-
-.cron-log-output {
-  margin-top: 8px;
-}
-
 .cron-cycle-select.ant-select {
   flex: 0 1 120px;
   width: 120px;

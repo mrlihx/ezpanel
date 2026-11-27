@@ -38,7 +38,10 @@ import { FTPServiceSettings, FTPUsers } from './FTPVisual';
 import RsyncVisual from './RsyncVisual';
 import RsyncWorkspace from './RsyncWorkspace';
 import './apps.css';
+const FRPSettings = lazy(() => import('./FRPSettings'));
 const CodeEditor = lazy(() => import('../../components/CodeEditor'));
+const SupervisorPrograms = lazy(() => import('./SupervisorPrograms'));
+const SoftwareLogContent = lazy(() => import('./SoftwareLogContent'));
 
 const toolSettings: Record<
   string,
@@ -53,8 +56,8 @@ const toolSettings: Record<
     ],
   },
   supervisor: {
-    label: '守护进程',
-    help: '在 [program:名称] 中配置宿主机进程的运行用户、执行命令、工作目录和重启策略。',
+    label: '配置文件',
+    help: '编辑 Supervisor 主配置文件。守护任务可在「进程管理」中添加和修改。',
   },
   clamav: {
     label: '扫描设置',
@@ -82,10 +85,15 @@ export type ApplicationSettingsProps = {
   control: (action: 'start' | 'stop' | 'restart' | 'reload') => void;
   uninstall: () => void;
   onClose: () => void;
-  switchVersion: () => void;
   onAuthentication?: () => void;
 };
 export default function ApplicationSettings(props: ApplicationSettingsProps) {
+  if (props.app.id === 'frp')
+    return (
+      <Suspense fallback={<Skeleton active />}>
+        <FRPSettings {...props} />
+      </Suspense>
+    );
   if (props.app.id === 'phpmyadmin') return <PhpMyAdminSettings {...props} />;
   if (props.app.id === 'nginx') return <NginxSettings {...props} />;
   if (props.app.id.startsWith('php-')) return <PHPSettings {...props} />;
@@ -127,7 +135,7 @@ function GenericSettings({
   const logs = useQuery({
     queryKey: ['app-logs', app.id],
     queryFn: () => applicationLogs(app.id),
-    enabled: tab === 'logs' && app.manageable,
+    enabled: tab === 'logs' && app.manageable && app.id !== 'supervisor',
   });
   const dirty = draft !== undefined && draft !== config.data?.content;
   const close = () => {
@@ -146,7 +154,13 @@ function GenericSettings({
       );
       setDraft(undefined);
       await config.refetch();
-      message.success(canReload ? '配置已保存，重载配置后生效' : '配置已保存');
+      message.success(
+        app.id === 'supervisor'
+          ? '主配置已保存'
+          : canReload
+            ? '配置已保存，重载配置后生效'
+            : '配置已保存',
+      );
     } finally {
       setSaving(false);
     }
@@ -156,7 +170,7 @@ function GenericSettings({
       open
       centered
       title={`${app.name} · 设置`}
-      width={1040}
+      width={app.id === 'supervisor' ? 1280 : 1040}
       styles={appSettingsModalStyles}
       onCancel={close}
       footer={null}
@@ -374,6 +388,22 @@ function GenericSettings({
               </div>
             ),
           },
+          ...(app.manageable && app.id === 'supervisor'
+            ? [
+                {
+                  key: 'programs',
+                  label: '进程管理',
+                  children: (
+                    <Suspense fallback={<Skeleton active />}>
+                      <SupervisorPrograms
+                        busy={busy}
+                        active={tab === 'programs'}
+                      />
+                    </Suspense>
+                  ),
+                },
+              ]
+            : []),
           ...(app.manageable && ftp
             ? [{ key: 'ftp-users', label: '用户管理', children: <FTPUsers /> }]
             : []),
@@ -520,9 +550,11 @@ function GenericSettings({
                               </Suspense>
                             </div>
                             <Typography.Text type="secondary">
-                              {canReload
-                                ? '保存后点击服务页的「重载配置」。'
-                                : '保存后按应用要求使配置生效。'}
+                              {app.id === 'supervisor'
+                                ? '进程配置可通过「重载配置」应用，Supervisor 自身的日志、监听等选项修改后需重启服务。'
+                                : canReload
+                                  ? '保存后点击服务页的「重载配置」。'
+                                  : '保存后按应用要求使配置生效。'}
                             </Typography.Text>
                             {app.id === 'mysql' &&
                               app.pkgManager === '官方软件源' && (
@@ -541,39 +573,46 @@ function GenericSettings({
             : []),
           {
             key: 'logs',
-            label: '运行日志',
+            label: app.id === 'supervisor' ? '日志' : '运行日志',
             disabled: !app.manageable || app.running === null,
-            children: (
-              <Space
-                direction="vertical"
-                size={SPACING.md}
-                style={{ width: '100%' }}
-              >
-                <div className="app-settings-toolbar">
-                  <Typography.Text type="secondary">
-                    展示最近的服务运行输出日志
-                  </Typography.Text>
-                  <Button
-                    loading={logs.isFetching}
-                    onClick={() => void logs.refetch()}
-                  >
-                    刷新日志
-                  </Button>
-                </div>
-                {logs.error && (
-                  <Alert type="error" message={logs.error.message} />
-                )}
-                <LogText
-                  style={{
-                    height: 'max(360px, calc(72dvh - 125px))',
-                    overflow: 'auto',
-                    whiteSpace: 'pre-wrap',
-                  }}
+            children:
+              app.id === 'supervisor' ? (
+                <Suspense fallback={<Skeleton active />}>
+                  {tab === 'logs' && (
+                    <SoftwareLogContent url="/api/software/supervisor/log?kind=stdout" />
+                  )}
+                </Suspense>
+              ) : (
+                <Space
+                  direction="vertical"
+                  size={SPACING.md}
+                  style={{ width: '100%' }}
                 >
-                  {logs.data?.content || '暂无服务日志'}
-                </LogText>
-              </Space>
-            ),
+                  <div className="app-settings-toolbar">
+                    <Typography.Text type="secondary">
+                      展示最近的服务运行输出日志
+                    </Typography.Text>
+                    <Button
+                      loading={logs.isFetching}
+                      onClick={() => void logs.refetch()}
+                    >
+                      刷新日志
+                    </Button>
+                  </div>
+                  {logs.error && (
+                    <Alert type="error" message={logs.error.message} />
+                  )}
+                  <LogText
+                    style={{
+                      height: 'max(360px, calc(72dvh - 125px))',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
+                    {logs.data?.content || '暂无服务日志'}
+                  </LogText>
+                </Space>
+              ),
           },
         ]}
       />

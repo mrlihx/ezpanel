@@ -17,13 +17,14 @@ import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { request } from '../../api/client';
 import { RotateCw } from 'lucide-react';
 import type { Application } from '../../api/software';
+import ApplicationInstallGuide from '../../components/ApplicationInstallGuide';
 import ApplicationServiceControl from '../apps/ApplicationServiceControl';
 import RemoteDatabases from './RemoteDatabases';
-import EnvironmentOverlay from './EnvironmentOverlay';
 import DeleteDatabaseModal from './DeleteDatabaseModal';
 import RedisBrowser from './RedisBrowser';
 import RootPasswordModal from './RootPasswordModal';
 import DatabaseInstanceControl from './DatabaseInstanceControl';
+import DatabaseInstancesStatus from './DatabaseInstancesStatus';
 import { useDatabaseSelection } from './useDatabaseSelection';
 import MongoDataModal from './MongoDataModal';
 import { LAYOUT, SPACING } from '../../styles/tokens';
@@ -54,6 +55,7 @@ export default function NoSQL({ engine }: { engine: 'mongodb' | 'redis' }) {
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState('');
   const [redisEditor, setRedisEditor] = useState<string | null>(null);
+  const [redisToolbar, setRedisToolbar] = useState<HTMLDivElement | null>(null);
   const [form] = Form.useForm();
   const [operation] = Form.useForm();
   const base = `/api/db/nosql/${engine}`;
@@ -97,6 +99,12 @@ export default function NoSQL({ engine }: { engine: 'mongodb' | 'redis' }) {
     connections.data,
   );
   const isAllMongo = engine === 'mongodb' && allMode;
+  const mongoCreateTarget =
+    current && current.running !== false
+      ? current
+      : isAllMongo
+        ? connections.data?.find((row) => row.running !== false)
+        : undefined;
   const mongoTargets =
     engine === 'mongodb'
       ? isAllMongo
@@ -171,7 +179,7 @@ export default function NoSQL({ engine }: { engine: 'mongodb' | 'redis' }) {
   function open(kind: 'database' | 'key') {
     operation.resetFields();
     if (kind === 'database') {
-      operation.setFieldsValue({ serverId: current?.id });
+      operation.setFieldsValue({ serverId: mongoCreateTarget?.id });
       setCreating(true);
     }
     if (kind === 'key') {
@@ -181,181 +189,218 @@ export default function NoSQL({ engine }: { engine: 'mongodb' | 'redis' }) {
   const errors = [environment.error, connections.error, dbs.error].filter(
     Boolean,
   );
+  const needsInstallation =
+    environment.isSuccess &&
+    !environment.data.application.installed &&
+    connections.isSuccess &&
+    connections.data.length === 0;
   return (
-    <div style={{ position: 'relative', minHeight: 500 }}>
-      {!environment.isPending &&
-        !connections.isPending &&
-        !environment.isError &&
-        !connections.isError &&
-        !environment.data?.application.installed &&
-        !current && (
-          <EnvironmentOverlay
-            engine={engine}
-            label={label}
-            onRemote={() => setRemoteOpen(true)}
-          />
-        )}
+    <>
+      {needsInstallation ? (
+        <ApplicationInstallGuide
+          name={label}
+          install={engine}
+          onDetect={refresh}
+          extra={
+            <Button onClick={() => setRemoteOpen(true)}>添加远程数据库</Button>
+          }
+        />
+      ) : (
+        <div style={{ minHeight: 500 }}>
+          <Card style={{ marginBottom: SPACING.lg }}>
+            <Flex justify="space-between" align="center" gap={SPACING.md} wrap>
+              <Space wrap>
+                {engine === 'redis' && (
+                  <Button
+                    type="primary"
+                    disabled={!current || current.running === false}
+                    onClick={() => open('key')}
+                  >
+                    添加Key
+                  </Button>
+                )}
+                {engine === 'mongodb' && (
+                  <Button
+                    type="primary"
+                    disabled={!mongoCreateTarget}
+                    onClick={() => open('database')}
+                  >
+                    添加数据库
+                  </Button>
+                )}
 
-      <Card style={{ marginBottom: SPACING.lg }}>
-        <Flex justify="space-between" align="center" gap={SPACING.md} wrap>
-          <Space wrap>
-            {engine === 'redis' && (
-              <Button
-                type="primary"
-                disabled={!current || current.running === false}
-                onClick={() => open('key')}
-              >
-                添加Key
-              </Button>
-            )}
-            {engine === 'mongodb' && (
-              <Button
-                type="primary"
-                disabled={!current || current.running === false}
-                onClick={() => open('database')}
-              >
-                添加数据库
-              </Button>
-            )}
-
-            {engine === 'mongodb' && (
-              <Button
-                disabled={!current || current.running === false}
-                onClick={() => setRootOpen(true)}
-              >
-                ROOT密码
-              </Button>
-            )}
-            <Button onClick={() => setRemoteOpen(true)}>远程数据库</Button>
-            {dockerInstance && current ? (
-              <DatabaseInstanceControl
-                key={current.id}
-                engine={engine}
-                instanceId={dockerInstance}
-                name={current.name}
-                version={
-                  current.version ?? localApplication?.version ?? undefined
-                }
-                running={current.running ?? !!localApplication?.running}
-                onAuthentication={() => setEditing(current)}
-                onChanged={refresh}
+                {engine === 'mongodb' && (
+                  <Button
+                    disabled={!current || current.running === false}
+                    onClick={() => setRootOpen(true)}
+                  >
+                    ROOT密码
+                  </Button>
+                )}
+                <Button onClick={() => setRemoteOpen(true)}>远程数据库</Button>
+                {isAllMongo &&
+                connections.data &&
+                connections.data.length > 1 ? (
+                  <DatabaseInstancesStatus
+                    engine={engine}
+                    instances={connections.data.map((connection) => ({
+                      id: connection.id,
+                      name: connLabel(connection),
+                      version: connection.version,
+                      running: connection.local
+                        ? (connection.running ?? !!localApplication?.running)
+                        : connection.running,
+                      instanceId:
+                        connection.instanceId ??
+                        (connection.local &&
+                        localApplication?.pkgManager === 'Docker'
+                          ? 'default'
+                          : undefined),
+                      native:
+                        connection.local && !!localApplication?.manageable,
+                    }))}
+                    onChanged={refresh}
+                  />
+                ) : dockerInstance && current ? (
+                  <DatabaseInstanceControl
+                    key={current.id}
+                    engine={engine}
+                    instanceId={dockerInstance}
+                    name={current.name}
+                    version={
+                      current.version ?? localApplication?.version ?? undefined
+                    }
+                    running={current.running ?? !!localApplication?.running}
+                    onAuthentication={() => setEditing(current)}
+                    onChanged={refresh}
+                  />
+                ) : (
+                  (!current || current.local) &&
+                  environment.data?.application && (
+                    <ApplicationServiceControl
+                      app={environment.data.application}
+                      onAuthentication={
+                        current?.local ? () => setEditing(current) : undefined
+                      }
+                      onChanged={refresh}
+                    />
+                  )
+                )}
+              </Space>
+              <Space wrap>
+                <Select
+                  style={{
+                    width: LAYOUT.databaseSelectWidth,
+                    maxWidth: '100%',
+                  }}
+                  placeholder={`选择 ${label} 实例`}
+                  value={isAllMongo ? '__all__' : current?.id}
+                  options={[
+                    ...(engine === 'mongodb'
+                      ? [{ value: '__all__', label: '全部' }]
+                      : []),
+                    ...(connections.data?.map((row) => ({
+                      value: row.id,
+                      label: `${connLabel(row)}${row.running === false ? '（已停止）' : ''}`,
+                    })) ?? []),
+                  ]}
+                  onChange={(v) => {
+                    if (v === '__all__') {
+                      setAllMode(true);
+                    } else {
+                      setAllMode(false);
+                      setSid(v);
+                    }
+                    setDeleting(undefined);
+                    setSelected('');
+                    setRedisEditor(null);
+                  }}
+                />
+                {engine === 'mongodb' ? (
+                  <>
+                    <Input.Search
+                      allowClear
+                      placeholder="请输入数据库名称"
+                      onSearch={setKeyword}
+                    />
+                    <Button
+                      aria-label="刷新"
+                      title="刷新"
+                      icon={<RotateCw size={16} strokeWidth={1.9} />}
+                      onClick={refresh}
+                    />
+                  </>
+                ) : (
+                  current &&
+                  current.running !== false && <div ref={setRedisToolbar} />
+                )}
+              </Space>
+            </Flex>
+          </Card>
+          <Card>
+            {errors.map((err, i) => (
+              <Alert
+                key={i}
+                type="error"
+                message={err?.message}
+                style={{ marginBottom: 12 }}
               />
-            ) : (
-              (!current || current.local) &&
-              environment.data?.application && (
-                <ApplicationServiceControl
-                  app={environment.data.application}
-                  onAuthentication={
-                    current?.local ? () => setEditing(current) : undefined
+            ))}
+            {!isAllMongo && current?.running === false ? (
+              <Empty description="所选实例已停止" />
+            ) : !current && !isAllMongo ? (
+              <Empty description={`添加${label}连接后管理数据库`} />
+            ) : engine === 'mongodb' ? (
+              <>
+                <MongoDatabaseList
+                  key={isAllMongo ? '__all__' : current?.id}
+                  prefix={prefix}
+                  connectionId={current?.id ?? ''}
+                  locationLabel={current ? connLabel(current) : label}
+                  loading={dbs.isFetching}
+                  rows={
+                    dbs.data?.filter(
+                      (row) =>
+                        !row.system &&
+                        row.name.toLowerCase().includes(keyword.toLowerCase()),
+                    ) ?? []
                   }
+                  onData={(name, cid) => {
+                    setActiveConnId(cid || current?.id || '');
+                    setSelected(name);
+                  }}
+                  onDelete={(name, cid) => {
+                    setActiveConnId(cid || current?.id || '');
+                    setDeleting(name);
+                  }}
                   onChanged={refresh}
                 />
-              )
-            )}
-          </Space>
-          <Space wrap>
-            <Select
-              style={{ width: LAYOUT.databaseSelectWidth, maxWidth: '100%' }}
-              placeholder={`选择 ${label} 实例`}
-              value={isAllMongo ? '__all__' : current?.id}
-              options={[
-                ...(engine === 'mongodb'
-                  ? [{ value: '__all__', label: '全部' }]
-                  : []),
-                ...(connections.data?.map((row) => ({
-                  value: row.id,
-                  label: `${connLabel(row)}${row.running === false ? '（已停止）' : ''}`,
-                })) ?? []),
-              ]}
-              onChange={(v) => {
-                if (v === '__all__') {
-                  setAllMode(true);
-                } else {
-                  setAllMode(false);
-                  setSid(v);
-                }
-                setDeleting(undefined);
-                setSelected('');
-                setRedisEditor(null);
-              }}
-            />
-            {engine === 'mongodb' && (
-              <Input.Search
-                allowClear
-                placeholder="请输入数据库名称"
-                onSearch={setKeyword}
+                {selected && (
+                  <MongoDataModal
+                    key={`${activeConnId || current?.id}-${selected}`}
+                    prefix={activeMongoPrefix}
+                    database={selected}
+                    readOnly={
+                      dbs.data?.find((row) => row.name === selected)?.system ??
+                      false
+                    }
+                    onClose={() => setSelected('')}
+                    onChanged={() => void dbs.refetch()}
+                  />
+                )}
+              </>
+            ) : (
+              <RedisBrowser
+                key={current!.id}
+                prefix={prefix}
+                toolbar={redisToolbar}
+                editing={redisEditor}
+                onEdit={setRedisEditor}
               />
             )}
-            <Button
-              aria-label="刷新"
-              title="刷新"
-              icon={<RotateCw size={16} strokeWidth={1.9} />}
-              onClick={refresh}
-            />
-          </Space>
-        </Flex>
-      </Card>
-      <Card>
-        {errors.map((err, i) => (
-          <Alert
-            key={i}
-            type="error"
-            message={err?.message}
-            style={{ marginBottom: 12 }}
-          />
-        ))}
-        {!isAllMongo && current?.running === false ? (
-          <Empty description="所选实例已停止" />
-        ) : !current && !isAllMongo ? (
-          <Empty description={`添加${label}连接后管理数据库`} />
-        ) : engine === 'mongodb' ? (
-          <>
-            <MongoDatabaseList
-              key={isAllMongo ? '__all__' : current?.id}
-              prefix={prefix}
-              connectionId={current?.id ?? ''}
-              locationLabel={current ? connLabel(current) : label}
-              loading={dbs.isFetching}
-              rows={
-                dbs.data?.filter(
-                  (row) =>
-                    !row.system &&
-                    row.name.toLowerCase().includes(keyword.toLowerCase()),
-                ) ?? []
-              }
-              onData={(name, cid) => {
-                setActiveConnId(cid || current?.id || '');
-                setSelected(name);
-              }}
-              onDelete={(name, cid) => {
-                setActiveConnId(cid || current?.id || '');
-                setDeleting(name);
-              }}
-              onChanged={refresh}
-            />
-            {selected && (
-              <MongoDataModal
-                key={`${activeConnId || current?.id}-${selected}`}
-                prefix={activeMongoPrefix}
-                database={selected}
-                readOnly={
-                  dbs.data?.find((row) => row.name === selected)?.system ??
-                  false
-                }
-                onClose={() => setSelected('')}
-                onChanged={() => void dbs.refetch()}
-              />
-            )}
-          </>
-        ) : (
-          <RedisBrowser
-            key={current!.id}
-            prefix={prefix}
-            editing={redisEditor}
-            onEdit={setRedisEditor}
-          />
-        )}
-      </Card>
+          </Card>
+        </div>
+      )}
       {rootOpen && current && (
         <RootPasswordModal
           base={prefix}
@@ -540,12 +585,7 @@ export default function NoSQL({ engine }: { engine: 'mongodb' | 'redis' }) {
           await run(async () => {
             await request(`${base}/connections/${values.serverId}/databases`, {
               method: 'POST',
-              data: {
-                name: values.name,
-                collection: values.collection,
-                username: values.username || undefined,
-                password: values.password || undefined,
-              },
+              data: { name: values.name },
             });
             const queryKey = ['nosql-databases', engine, values.serverId];
             await client.cancelQueries({ queryKey, exact: true });
@@ -568,29 +608,9 @@ export default function NoSQL({ engine }: { engine: 'mongodb' | 'redis' }) {
             name="name"
             label="数据库名称"
             rules={[{ required: true, pattern: /^[a-zA-Z0-9_-]{1,63}$/ }]}
+            extra="自动创建同名账号，密码可在数据库列表查看。"
           >
             <Input />
-          </Form.Item>
-          <Form.Item
-            name="collection"
-            label="初始集合"
-            rules={[
-              {
-                required: true,
-                pattern: /^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,119}$/,
-              },
-            ]}
-          >
-            <Input placeholder="MongoDB通过首个集合建立数据库" />
-          </Form.Item>
-          <Form.Item name="username" label="专属用户名" rules={[{ max: 128 }]}>
-            <Input placeholder="选填，留空仅创建数据库" />
-          </Form.Item>
-          <Form.Item name="password" label="专属密码">
-            <Input.Password
-              autoComplete="new-password"
-              placeholder="填写专属用户名时必填"
-            />
           </Form.Item>
           <Form.Item
             name="serverId"
@@ -607,6 +627,6 @@ export default function NoSQL({ engine }: { engine: 'mongodb' | 'redis' }) {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </>
   );
 }

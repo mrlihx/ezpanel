@@ -1,5 +1,6 @@
 VERSION ?= 0.0.0-dev
-LDFLAGS = -X ezpanel/internal/version.Version=$(VERSION)
+RELEASE_TAG ?=
+LDFLAGS = -X ezpanel/internal/version.Version=$(VERSION) -X ezpanel/internal/version.ReleaseTag=$(RELEASE_TAG)
 FRONTEND_DIR = web
 FRONTEND_INDEX = $(FRONTEND_DIR)/dist/index.html
 
@@ -9,7 +10,7 @@ check-node:
 	@node -e "if (process.versions.node.split('.')[0] !== '24') { console.error('请先使用 Node 24 LTS（nvm use）'); process.exit(1) }"
 
 frontend: check-node
-	cd $(FRONTEND_DIR) && npm ci && npm run build
+	cd $(FRONTEND_DIR) && if [ ! -d node_modules ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci; fi && npm run build
 	test -s $(FRONTEND_INDEX)
 	test -d $(FRONTEND_DIR)/dist/assets
 

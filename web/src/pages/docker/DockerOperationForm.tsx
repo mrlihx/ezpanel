@@ -10,12 +10,12 @@ import {
   Modal,
   Select,
   Switch,
-  Typography,
   type FormInstance,
 } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
 import type { Container, Image, Network } from '../../api/docker';
 import { LAYOUT } from '../../styles/tokens';
+import './docker-operation-form.css';
 export type Operation = {
   kind:
     | 'container'
@@ -61,10 +61,11 @@ export default function DockerOperationForm({
   const itemName = (row: Container) =>
     row.Names?.map((name) => name.replace(/^\//, '')).join(', ') ||
     row.Id.slice(0, 12);
+  const creatingContainer = operation?.kind === 'container';
   return (
     <Modal
       open={!!operation}
-      width={LAYOUT.databaseModalWidth}
+      width={creatingContainer ? 800 : LAYOUT.databaseModalWidth}
       title={
         operation
           ? {
@@ -89,9 +90,10 @@ export default function DockerOperationForm({
     >
       <Form
         form={form}
+        className={creatingContainer ? 'docker-create-form' : undefined}
         layout="horizontal"
         labelCol={{ flex: LAYOUT.formLabelWidth }}
-        wrapperCol={{ flex: 1 }}
+        wrapperCol={{ flex: creatingContainer ? '1 1 0' : 1 }}
         colon={false}
       >
         {['container', 'network', 'volume', 'registry', 'rename'].includes(
@@ -203,20 +205,26 @@ export default function DockerOperationForm({
             </Form.Item>
           </>
         )}
-        {operation?.kind === 'container' && (
+        {creatingContainer && (
           <>
             <Form.Item name="restart" label="重启策略">
               <Select options={restartOptions} />
             </Form.Item>
-            <Form.Item name="memoryMB" label="内存限制（MB）">
-              <InputNumber min={0} max={1048576} addonAfter="0不限" />
-            </Form.Item>
-            <Form.Item name="cpus" label="CPU核数">
-              <InputNumber min={0} max={1024} step={0.1} addonAfter="0不限" />
-            </Form.Item>
+            <div className="docker-create-limits">
+              <Form.Item name="cpus" label="CPU 核数">
+                <InputNumber min={0} max={1024} step={0.1} addonAfter="0不限" />
+              </Form.Item>
+              <Form.Item
+                name="memoryMB"
+                label="内存限制（MB）"
+                labelCol={{ flex: 'none' }}
+              >
+                <InputNumber min={0} max={1048576} addonAfter="0不限" />
+              </Form.Item>
+            </div>
           </>
         )}
-        {operation?.kind === 'container' && (
+        {creatingContainer && (
           <>
             <Form.Item name="network" label="网络">
               <Select options={networkList?.map((r) => ({ value: r.Name }))} />
@@ -246,60 +254,64 @@ export default function DockerOperationForm({
             >
               <Input placeholder='["nginx", "-g", "daemon off;"]' />
             </Form.Item>
-            <Form.List name="ports">
-              {(fields, { add, remove }) => (
-                <Flex vertical gap={8} style={{ marginBottom: 16 }}>
-                  <Typography.Text>端口映射</Typography.Text>
-                  {fields.map(({ key, name, ...rest }) => (
-                    <Flex key={key} gap={8} wrap>
-                      <Form.Item {...rest} name={[name, 'hostIp']}>
-                        <Input placeholder="主机IP（默认全部）" />
-                      </Form.Item>
-                      <Form.Item
-                        {...rest}
-                        name={[name, 'host']}
-                        rules={[{ required: true }]}
-                      >
-                        <InputNumber
-                          min={1}
-                          max={65535}
-                          placeholder="主机端口"
+            <Form.Item label="端口映射" className="docker-create-list">
+              <Form.List name="ports">
+                {(fields, { add, remove }) => (
+                  <Flex vertical gap={8}>
+                    {fields.map(({ key, name, ...rest }) => (
+                      <div key={key} className="docker-create-port">
+                        <Form.Item {...rest} name={[name, 'hostIp']}>
+                          <Input placeholder="主机IP（默认全部）" />
+                        </Form.Item>
+                        <Form.Item
+                          {...rest}
+                          name={[name, 'host']}
+                          rules={[{ required: true }]}
+                        >
+                          <InputNumber
+                            min={1}
+                            max={65535}
+                            placeholder="主机端口"
+                          />
+                        </Form.Item>
+                        <Form.Item
+                          {...rest}
+                          name={[name, 'container']}
+                          rules={[{ required: true }]}
+                        >
+                          <InputNumber
+                            min={1}
+                            max={65535}
+                            placeholder="容器端口"
+                          />
+                        </Form.Item>
+                        <Form.Item {...rest} name={[name, 'protocol']}>
+                          <Select
+                            aria-label="协议"
+                            options={[{ value: 'tcp' }, { value: 'udp' }]}
+                          />
+                        </Form.Item>
+                        <Button
+                          aria-label="移除端口映射"
+                          icon={<DeleteOutlined />}
+                          onClick={() => remove(name)}
                         />
-                      </Form.Item>
-                      <Form.Item
-                        {...rest}
-                        name={[name, 'container']}
-                        rules={[{ required: true }]}
-                      >
-                        <InputNumber
-                          min={1}
-                          max={65535}
-                          placeholder="容器端口"
-                        />
-                      </Form.Item>
-                      <Form.Item {...rest} name={[name, 'protocol']}>
-                        <Select
-                          style={{ width: 80 }}
-                          options={[{ value: 'tcp' }, { value: 'udp' }]}
-                        />
-                      </Form.Item>
+                      </div>
+                    ))}
+                    <div>
                       <Button
-                        icon={<DeleteOutlined />}
-                        onClick={() => remove(name)}
-                      />
-                    </Flex>
-                  ))}
-                  <div>
-                    <Button
-                      onClick={() => add({ protocol: 'tcp', hostIp: '' })}
-                    >
-                      添加端口
-                    </Button>
-                  </div>
-                </Flex>
-              )}
-            </Form.List>
-            <ContainerMountFields />
+                        onClick={() => add({ protocol: 'tcp', hostIp: '' })}
+                      >
+                        添加端口
+                      </Button>
+                    </div>
+                  </Flex>
+                )}
+              </Form.List>
+            </Form.Item>
+            <Form.Item label="存储挂载" className="docker-create-list">
+              <ContainerMountFields />
+            </Form.Item>
             <Form.Item
               name="autoStart"
               label="创建后启动"

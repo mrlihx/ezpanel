@@ -25,14 +25,20 @@ type Listener struct {
 func NewListener(handler http.Handler) *Listener {
 	return &Listener{handler: handler, Errors: make(chan error, 1)}
 }
-func (m *Listener) open(c config.Config) (*http.Server, net.Listener, error) {
+func (m *Listener) open(c config.Config, pair *tls.Certificate) (*http.Server, net.Listener, error) {
 	var t *tls.Config
 	if c.TLSCert != "" {
-		pair, e := tls.LoadX509KeyPair(c.TLSCert, c.TLSKey)
-		if e != nil {
-			return nil, nil, e
+		var loaded tls.Certificate
+		if pair != nil {
+			loaded = *pair
+		} else {
+			var e error
+			loaded, e = tls.LoadX509KeyPair(c.TLSCert, c.TLSKey)
+			if e != nil {
+				return nil, nil, e
+			}
 		}
-		t = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pair}}
+		t = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{loaded}}
 	}
 	ln, e := net.Listen("tcp", net.JoinHostPort(c.ListenAddr, strconv.Itoa(c.Port)))
 	if e != nil {
@@ -60,20 +66,23 @@ func (m *Listener) Apply(c config.Config) error {
 	defer m.mu.Unlock()
 	old, oldConfig := m.server, m.cfg
 	// 证书校验发生在关闭入口前；业务长任务不依赖此监听器。
+	var pair *tls.Certificate
 	if c.TLSCert != "" {
-		if _, e := tls.LoadX509KeyPair(c.TLSCert, c.TLSKey); e != nil {
+		loaded, e := tls.LoadX509KeyPair(c.TLSCert, c.TLSKey)
+		if e != nil {
 			return e
 		}
+		pair = &loaded
 	}
 	rebind := m.listener != nil && c.ListenAddr == oldConfig.ListenAddr && c.Port == oldConfig.Port
 	if rebind {
 		m.listener.Close()
 	}
-	srv, ln, e := m.open(c)
+	srv, ln, e := m.open(c, pair)
 	if e != nil {
 		if rebind {
 			var restore error
-			m.server, m.listener, restore = m.open(oldConfig)
+			m.server, m.listener, restore = m.open(oldConfig, nil)
 			e = errors.Join(e, restore)
 		}
 		return e

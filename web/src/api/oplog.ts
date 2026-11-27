@@ -29,7 +29,6 @@ export const listLogs = (page: number, size: number, filters: Filters) =>
   request<{ list: OpLog[]; total: number }>('/api/oplogs', {
     params: { page, page_size: size, ...filters },
   });
-export const getLog = (id: number) => request<OpLog>(`/api/oplogs/${id}`);
 export const clearLogs = (beforeDays: number, filters: Filters = {}) =>
   request<{ deletedCount: number }>('/api/oplogs/clear', {
     method: 'POST',

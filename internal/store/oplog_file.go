@@ -37,13 +37,14 @@ type OpLogIPStat struct {
 }
 
 type opLogFileStore struct {
-	mu      sync.RWMutex
-	path    string // empty => in-memory only (for :memory: tests)
-	nextID  uint
-	loaded  bool
-	mem     []OpLog
-	byTime  []int
-	loadErr error
+	mu         sync.RWMutex
+	path       string // empty => in-memory only (for :memory: tests)
+	appendFile *os.File
+	nextID     uint
+	loaded     bool
+	mem        []OpLog
+	byTime     []int
+	loadErr    error
 }
 
 var opLogStores sync.Map // map[gorm.ConnPool]*opLogFileStore
@@ -68,6 +69,10 @@ func SetOpLogPath(db *gorm.DB, path string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.appendFile != nil {
+		_ = s.appendFile.Close()
+		s.appendFile = nil
+	}
 	s.path = path
 	s.loaded = false
 	s.mem = nil
@@ -164,17 +169,17 @@ func (s *opLogFileStore) append(entry *OpLog) error {
 		if err != nil {
 			return err
 		}
-		f, err := os.OpenFile(s.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-		if err != nil {
-			return err
+		if s.appendFile == nil {
+			f, err := os.OpenFile(s.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				return err
+			}
+			s.appendFile = f
 		}
-		_, werr := f.Write(append(raw, '\n'))
-		cerr := f.Close()
-		if werr != nil {
+		if _, werr := s.appendFile.Write(append(raw, '\n')); werr != nil {
+			_ = s.appendFile.Close()
+			s.appendFile = nil
 			return werr
-		}
-		if cerr != nil {
-			return cerr
 		}
 	}
 	i := sort.Search(len(s.byTime), func(i int) bool {
@@ -260,6 +265,10 @@ func matchOpLog(item OpLog, f OpLogFilter) bool {
 }
 
 func (s *opLogFileStore) rewriteLocked(items []OpLog) error {
+	if s.appendFile != nil {
+		_ = s.appendFile.Close()
+		s.appendFile = nil
+	}
 	if s.path == "" {
 		return nil
 	}
@@ -391,7 +400,20 @@ func ClearOpLogs(db *gorm.DB, f OpLogFilter, before *time.Time) (int64, error) {
 }
 
 func OpLogIPStats(db *gorm.DB, f OpLogFilter) []OpLogIPStat {
-	rows, _ := QueryOpLogs(db, OpLogFilter{
+	s := opLogStoreFor(db)
+	if s == nil {
+		return []OpLogIPStat{}
+	}
+	s.mu.RLock()
+	if !s.loaded {
+		s.mu.RUnlock()
+		s.mu.Lock()
+		s.ensureLoadedLocked()
+		s.mu.Unlock()
+		s.mu.RLock()
+	}
+	counts := map[string]int64{}
+	filter := OpLogFilter{
 		Module:          f.Module,
 		Modules:         f.Modules,
 		Success:         f.Success,
@@ -401,11 +423,13 @@ func OpLogIPStats(db *gorm.DB, f OpLogFilter) []OpLogIPStat {
 		Kind:            f.Kind,
 		ResourceID:      f.ResourceID,
 		ResourceTaskIDs: f.ResourceTaskIDs,
-	})
-	counts := map[string]int64{}
-	for _, r := range rows {
-		counts[r.IP]++
 	}
+	for _, item := range s.mem {
+		if matchOpLog(item, filter) {
+			counts[item.IP]++
+		}
+	}
+	s.mu.RUnlock()
 	out := make([]OpLogIPStat, 0, len(counts))
 	for ip, count := range counts {
 		out = append(out, OpLogIPStat{IP: ip, Count: count})

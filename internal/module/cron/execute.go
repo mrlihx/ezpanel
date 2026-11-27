@@ -223,10 +223,17 @@ func (m *Module) execute(ctx context.Context, r store.CronJob, cfg jobConfig, lo
 	return nil, errors.New("任务类型无效")
 }
 func (m *Module) disableInvalid(id, reason string) {
+	m.mu.Lock()
+	if entryID, ok := m.entries[id]; ok {
+		m.engine.Remove(entryID)
+		delete(m.entries, id)
+	}
+	m.mu.Unlock()
 	m.db.Model(&store.CronJob{}).Where("id = ?", id).Updates(map[string]any{"enabled": false, "disabled_reason": reason})
 }
-func (m *Module) backupSite(ctx context.Context, r store.CronJob, cfg jobConfig, id string, log *task.Log, options backup.ArchiveOptions) error {
+func (m *Module) backupSite(ctx context.Context, r store.CronJob, cfg jobConfig, id string, log *task.Log, options backup.ArchiveOptions) (err error) {
 	backup, err := m.backups.CreateSite(ctx, id, r.ID, log, options)
+	defer func() { m.backups.ReportSiteBackup(id, backup.ID, log.TaskID(), err) }()
 	if err != nil {
 		return err
 	}

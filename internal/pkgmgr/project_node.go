@@ -34,7 +34,7 @@ func (m *Manager) ChangeNodeProjectPackage(ctx context.Context, id, root, manage
 		args = append(args, "-D")
 	}
 	if spec != "" {
-		args = append(args, spec)
+		args = append(args, "--", spec)
 	}
 	_, err = m.Stream(ctx, 10*time.Minute, nil, onLine, docker, args...)
 	if err != nil {

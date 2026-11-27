@@ -1,6 +1,16 @@
 import { useNavigate } from 'react-router-dom';
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Alert, App, Form, Input, theme, type MenuProps, Grid } from 'antd';
+import {
+  Alert,
+  App,
+  Flex,
+  Form,
+  Grid,
+  Input,
+  Radio,
+  theme,
+  type MenuProps,
+} from 'antd';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { request } from '../../api/client';
@@ -260,13 +270,19 @@ export default function useDockerPage() {
     name: string,
     owner?: ReturnType<typeof containerOwnership>,
   ) => {
+    const appStoreOnly =
+      owner && 'deleteFromAppStore' in owner && owner.deleteFromAppStore;
     const dialog = modal.confirm({
       title: `删除${name}？`,
       content: owner ? (
         <Alert
           type={owner.label === '应用商店' ? 'error' : 'warning'}
           showIcon
-          message={owner.removal}
+          message={
+            appStoreOnly
+              ? '请在应用商店的实例管理中检查数据库并卸载实例。'
+              : owner.removal
+          }
           description={
             owner.link && (
               <a
@@ -288,7 +304,10 @@ export default function useDockerPage() {
         '此操作不可撤销，正在使用的资源由 Docker 拒绝删除。'
       ),
       okText: owner ? '仍然删除' : '删除',
-      okButtonProps: { danger: true },
+      okButtonProps: {
+        danger: true,
+        style: appStoreOnly ? { display: 'none' } : undefined,
+      },
       onOk: () =>
         run(async () => {
           await request(`/api/docker/${kind}/${encodeURIComponent(id)}`, {
@@ -315,24 +334,65 @@ export default function useDockerPage() {
         }),
     });
   };
-  const prune = (kind: string) =>
+  const prune = (kind: string) => {
+    let scope: 'dangling' | 'unused' = 'dangling';
     modal.confirm({
-      title: '清理未使用的资源？',
+      title: kind === 'images' ? '清理镜像' : '清理未使用的资源？',
       content:
-        kind === 'volumes'
-          ? '未被容器引用的存储卷及数据将永久删除。'
-          : kind === 'containers'
-            ? '仅清理已停止的独立容器，挂载的存储卷会保留。'
-            : '仅清理 Docker 判定未使用的资源。',
+        kind === 'images' ? (
+          <Flex vertical gap={12}>
+            <Radio.Group
+              defaultValue={scope}
+              onChange={(event) => {
+                scope = event.target.value;
+              }}
+            >
+              <Flex vertical gap={8}>
+                <Radio value="dangling">
+                  仅清理悬空镜像
+                  <span
+                    style={{
+                      display: 'block',
+                      color: token.colorTextSecondary,
+                    }}
+                  >
+                    清理没有标签且未被容器引用的镜像。
+                  </span>
+                </Radio>
+                <Radio value="unused">
+                  清理未被容器引用的镜像
+                  <span
+                    style={{
+                      display: 'block',
+                      color: token.colorTextSecondary,
+                    }}
+                  >
+                    包括带标签的镜像。未被容器保留的回滚镜像也会被清理。
+                  </span>
+                </Radio>
+              </Flex>
+            </Radio.Group>
+            <span>运行中和已停止的容器引用的镜像都会保留。</span>
+          </Flex>
+        ) : kind === 'volumes' ? (
+          '未被容器引用的存储卷及数据将永久删除。'
+        ) : kind === 'containers' ? (
+          '仅清理已停止的独立容器，挂载的存储卷会保留。'
+        ) : (
+          '仅清理 Docker 判定未使用的资源。'
+        ),
+      okText: kind === 'images' ? '清理' : undefined,
       okButtonProps: { danger: true },
       onOk: () =>
         run(async () => {
           const result = await request(`/api/docker/prune/${kind}`, {
             method: 'POST',
+            params: kind === 'images' ? { scope } : undefined,
           });
           setJsonDetail({ title: '清理结果', content: result });
         }),
     });
+  };
   async function transfer(
     kind: 'pull' | 'push',
     image: string,

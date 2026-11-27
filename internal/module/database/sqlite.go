@@ -82,7 +82,7 @@ func (m *Module) readSQLiteEntries() ([]sqliteEntry, error) {
 	}
 	var list []sqliteEntry
 	if err := json.Unmarshal([]byte(row.Value), &list); err != nil {
-		return []sqliteEntry{}, nil
+		return nil, err
 	}
 	return list, nil
 }
@@ -116,8 +116,22 @@ func sqliteDSN(real string, busyTimeoutMs int) string {
 	}).String()
 }
 
-func (m *Module) openSQLiteFile(path string) (*sql.DB, error) {
+func (m *Module) getSQLitePolicy() (*pathsafe.Policy, error) {
+	m.sqlitePolicyMu.Lock()
+	defer m.sqlitePolicyMu.Unlock()
+	if m.sqlitePolicy != nil {
+		return m.sqlitePolicy, nil
+	}
 	policy, err := pathsafe.New(m.cfg.InstallDir)
+	if err != nil {
+		return nil, err
+	}
+	m.sqlitePolicy = policy
+	return policy, nil
+}
+
+func (m *Module) openSQLiteFile(path string) (*sql.DB, error) {
+	policy, err := m.getSQLitePolicy()
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +407,11 @@ func (m *Module) sqliteTableRows(c *gin.Context) {
 		return
 	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "50"))
+	rawSize := c.Query("page_size")
+	if rawSize == "" {
+		rawSize = c.DefaultQuery("pageSize", "50")
+	}
+	pageSize, _ := strconv.Atoi(rawSize)
 	if page < 1 {
 		page = 1
 	}

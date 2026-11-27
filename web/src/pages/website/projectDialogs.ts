@@ -28,7 +28,6 @@ export type ProjectSettingsProps = {
   id: string;
   manageable: boolean;
   initialTab?: string;
-  onTabChange?: (tab: string, replace?: boolean) => void;
   onClose: () => void;
   onChanged: () => void;
 };

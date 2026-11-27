@@ -110,18 +110,10 @@
   min-width: 0;
 }
 
-.file-folder-icon,
-.file-type-icon {
+.file-folder-icon {
   flex-shrink: 0;
   font-size: var(--file-icon-size);
-}
-
-.file-folder-icon {
   color: var(--file-folder);
-}
-
-.file-type-icon {
-  color: var(--file-muted);
 }
 
 .file-identity-text {
@@ -184,17 +176,11 @@
 }
 
 .file-list .ant-table-row:hover .file-more,
-.file-list .ant-table-row:focus-within .file-more,
+.file-list .ant-table-row-selected .file-more,
+.file-list .file-more:focus-visible,
 .file-list .file-row-menu-open .file-more {
   opacity: 1;
   pointer-events: auto;
-}
-
-@media (width < 992px) and (hover: none) {
-  .file-list .file-more {
-    opacity: 1;
-    pointer-events: auto;
-  }
 }
 
 .file-row-actions {
@@ -234,14 +220,6 @@
 }
 
 @media (max-width: 992px) {
-  .file-page-heading {
-    align-items: flex-start;
-  }
-
-  .file-page-heading-tip {
-    display: none;
-  }
-
   .file-address {
     min-width: 0;
   }
@@ -346,10 +324,6 @@
   min-width: var(--permission-owner-width);
 }
 
-.file-permissions-group {
-  margin-bottom: var(--permission-gap);
-}
-
 /* 给横向滚动条保留空间，选中项目时只改变工具内容，不改变工具栏高度。 */
 .file-toolbar {
   flex-wrap: nowrap;
@@ -430,30 +404,6 @@
   border-inline-end: 1px solid var(--file-border);
 }
 
-.file-page-heading {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--file-space-lg, 16px);
-  margin-bottom: var(--file-space-lg, 16px);
-}
-
-.file-page-heading .ant-typography {
-  margin-bottom: 0;
-}
-
-.file-page-heading > div {
-  min-width: 0;
-}
-
-.file-page-heading-tip {
-  flex-shrink: 0;
-  font-size: var(--file-small-font, 12px);
-}
-
-.file-remark-editor {
-  width: 100%;
-}
 .file-property-value {
   overflow-wrap: anywhere;
 }

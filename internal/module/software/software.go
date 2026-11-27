@@ -21,17 +21,18 @@ import (
 )
 
 type Module struct {
-	db       *gorm.DB
-	tasks    *task.Manager
-	packages *pkgmgr.Manager
-	auth     *auth.Service
-	webCheck func() error
-	rsyncMu  sync.Mutex
-	cfg      config.Config
+	db           *gorm.DB
+	tasks        *task.Manager
+	packages     *pkgmgr.Manager
+	auth         *auth.Service
+	webCheck     func() error
+	rsyncMu      sync.Mutex
+	rsyncChanged chan struct{}
+	cfg          config.Config
 }
 
 func New(db *gorm.DB, cfg config.Config, tasks *task.Manager, packages *pkgmgr.Manager, a *auth.Service, webCheck func() error) *Module {
-	return &Module{db: db, cfg: cfg, tasks: tasks, packages: packages, auth: a, webCheck: webCheck}
+	return &Module{db: db, cfg: cfg, tasks: tasks, packages: packages, auth: a, webCheck: webCheck, rsyncChanged: make(chan struct{}, 1)}
 }
 func (m *Module) Name() string { return "software" }
 func (m *Module) Routes(g *gin.RouterGroup) {
@@ -59,7 +60,10 @@ func (m *Module) Routes(g *gin.RouterGroup) {
 	r.GET("/:id/logs", m.logs)
 	m.clamRoutes(r)
 	m.ftpRoutes(r)
+	m.supervisorRoutes(r)
+	m.frpRoutes(r)
 	r.GET("/rsync/visual", m.rsyncVisual)
+	r.GET("/rsync/receivers/:name/password", m.rsyncReceiverPassword)
 	r.PUT("/rsync/visual", m.rsyncVisual)
 	r.GET("/rsync/workspace", m.rsyncWorkspace)
 	r.PUT("/rsync/workspace", m.rsyncWorkspace)

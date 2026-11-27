@@ -85,36 +85,38 @@ func (m *Manager) SaveFTPSettings(ctx context.Context, in FTPVisual) error {
 		(in.PassiveStart == 0) != (in.PassiveEnd == 0) || in.PassiveEnd < in.PassiveStart {
 		return errors.New("FTP 端口或被动端口范围无效")
 	}
-	state, err := m.Status(ctx, "ftp")
-	if err != nil {
-		return err
-	}
-	if !state.Manageable {
-		return ErrUnsupported
-	}
-	values, err := m.ftpValues(state)
-	if err != nil {
-		return err
-	}
-	bind := strconv.Itoa(in.Port)
-	if in.Address != "" {
-		bind = in.Address + "," + bind
-	}
-	update := map[string]string{"Bind": bind, "PassivePortRange": "", "AltLog": ""}
-	if in.PassiveStart > 0 {
-		update["PassivePortRange"] = fmt.Sprintf("%d %d", in.PassiveStart, in.PassiveEnd)
-	}
-	if in.Logging {
-		if values["AltLog"] != "" {
-			update["AltLog"] = values["AltLog"]
-		} else {
-			if err := ensurePublicTree(m.layout().Root(), m.layout().LogDir(), m.layout().PureFTPdLogDir()); err != nil {
-				return err
-			}
-			update["AltLog"] = "clf:" + m.layout().PureFTPdLog()
+	return m.ApplicationChange("ftp", func() error {
+		state, err := m.Status(ctx, "ftp")
+		if err != nil {
+			return err
 		}
-	}
-	return m.writeFTPValues(ctx, state, update)
+		if !state.Manageable {
+			return ErrUnsupported
+		}
+		values, err := m.ftpValues(state)
+		if err != nil {
+			return err
+		}
+		bind := strconv.Itoa(in.Port)
+		if in.Address != "" {
+			bind = in.Address + "," + bind
+		}
+		update := map[string]string{"Bind": bind, "PassivePortRange": "", "AltLog": ""}
+		if in.PassiveStart > 0 {
+			update["PassivePortRange"] = fmt.Sprintf("%d %d", in.PassiveStart, in.PassiveEnd)
+		}
+		if in.Logging {
+			if values["AltLog"] != "" {
+				update["AltLog"] = values["AltLog"]
+			} else {
+				if err := ensurePublicTree(m.layout().Root(), m.layout().LogDir(), m.layout().PureFTPdLogDir()); err != nil {
+					return err
+				}
+				update["AltLog"] = "clf:" + m.layout().PureFTPdLog()
+			}
+		}
+		return m.writeFTPValues(ctx, state, update)
+	})
 }
 
 func (m *Manager) writeFTPValues(ctx context.Context, state State, values map[string]string) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"ezpanel/internal/auth"
@@ -20,10 +21,78 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
+)
+
+const (
+	hiddenMenusSettingKey = "panel.hidden_menus"
+	menuOrderSettingKey   = "panel.menu_order"
+	menuGroupsSettingKey  = "panel.menu_groups"
+	menuGroupKeyPrefix    = "group:"
+)
+
+type MenuGroup struct {
+	ID    string   `json:"id"`
+	Title string   `json:"title"`
+	Icon  string   `json:"icon"`
+	Items []string `json:"items"`
+}
+
+var (
+	lockedMenuKeys = map[string]bool{
+		"/":         true,
+		"/apps":     true,
+		"/settings": true,
+		"logout":    true,
+	}
+	hideableBuiltinMenuKeys = map[string]bool{
+		"/websites":  true,
+		"/databases": true,
+		"/docker":    true,
+		"/security":  true,
+		"/waf":       true,
+		"/files":     true,
+		"/crons":     true,
+		"/terminal":  true,
+		"/oplogs":    true,
+		"/tools":     true,
+	}
+	orderableBuiltinMenuKeys = map[string]bool{
+		"/websites":  true,
+		"/databases": true,
+		"/docker":    true,
+		"/security":  true,
+		"/waf":       true,
+		"/files":     true,
+		"/crons":     true,
+		"/terminal":  true,
+		"/oplogs":    true,
+		"/apps":      true,
+		"/tools":     true,
+		"/settings":  true,
+	}
+	allowedMenuGroupIcons = map[string]bool{
+		"folder":      true,
+		"blocks":      true,
+		"layers":      true,
+		"server":      true,
+		"globe":       true,
+		"shield":      true,
+		"wrench":      true,
+		"database":    true,
+		"terminal":    true,
+		"settings":    true,
+		"layout-grid": true,
+		"file-text":   true,
+	}
+	menuGroupIDPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+	pluginMenuKeyPattern = regexp.MustCompile(`^/p/[a-z0-9][a-z0-9-]{0,63}$`)
 )
 
 type Module struct {
@@ -45,6 +114,7 @@ func (m *Module) Routes(g *gin.RouterGroup) {
 	r := g.Group("/api/settings")
 	r.GET("", m.read)
 	r.PUT("/basic", m.basic)
+	r.PUT("/menus", m.menus)
 	r.PUT("/account", m.account)
 	r.PUT("/network", m.network)
 	r.GET("/terminal", m.terminal)
@@ -80,8 +150,234 @@ func (m *Module) read(c *gin.Context) {
 			privateKey = string(b)
 		}
 	}
+	policy := m.auth.SecurityPolicy()
+	groups := m.readMenuGroups()
 	c.Header("Cache-Control", "no-store")
-	response.OK(c, gin.H{"alias": s.Alias, "idleMinutes": s.IdleMinutes, "siteRoot": s.SiteRoot, "backupRoot": s.BackupRoot, "username": auth.Current(c).User.Username, "boundDomain": s.BoundDomain, "sslEnabled": s.TLSCert != "", "certificate": cert, "privateKey": privateKey, "certificateId": s.PanelCertificateID, "certificateInfo": certificateInfo, "keyConfigured": s.TLSKey != "", "publicUrl": s.PublicURL, "port": s.Port, "entry": s.Entry})
+	response.OK(c, gin.H{"alias": s.Alias, "idleMinutes": s.IdleMinutes, "siteRoot": s.SiteRoot, "backupRoot": s.BackupRoot, "hiddenMenus": m.readHiddenMenus(), "menuOrder": m.readMenuOrder(groups), "menuGroups": groups, "username": auth.Current(c).User.Username, "boundDomain": s.BoundDomain, "sslEnabled": s.TLSCert != "", "certificate": cert, "privateKey": privateKey, "certificateId": s.PanelCertificateID, "certificateInfo": certificateInfo, "keyConfigured": s.TLSKey != "", "publicUrl": s.PublicURL, "port": s.Port, "entry": s.Entry, "userAgentEnabled": policy.UserAgentEnabled, "userAgentAllow": policy.UserAgentAllow, "unauthStatus": policy.UnauthStatus, "unauthHtml": policy.UnauthHTML})
+}
+
+func validHideableMenuKey(key string) bool {
+	return hideableBuiltinMenuKeys[key] || pluginMenuKeyPattern.MatchString(key)
+}
+
+func validGroupableMenuKey(key string) bool {
+	return orderableBuiltinMenuKeys[key] || pluginMenuKeyPattern.MatchString(key)
+}
+
+func normalizeMenuGroupIcon(id, icon string) string {
+	if allowedMenuGroupIcons[icon] {
+		return icon
+	}
+	if id == "extensions" {
+		return "blocks"
+	}
+	return "folder"
+}
+
+func (m *Module) readMenuList(settingKey string, allow func(string) bool) []string {
+	if m.db == nil {
+		return []string{}
+	}
+	var row store.Setting
+	if err := m.db.First(&row, "key = ?", settingKey).Error; err != nil || row.Value == "" {
+		return []string{}
+	}
+	var raw []string
+	if err := json.Unmarshal([]byte(row.Value), &raw); err != nil {
+		return []string{}
+	}
+	out := make([]string, 0, len(raw))
+	for _, key := range raw {
+		if allow(key) && !slices.Contains(out, key) {
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
+func (m *Module) readMenuGroups() []MenuGroup {
+	if m.db == nil {
+		return []MenuGroup{}
+	}
+	var row store.Setting
+	if err := m.db.First(&row, "key = ?", menuGroupsSettingKey).Error; err != nil || row.Value == "" {
+		return []MenuGroup{}
+	}
+	var raw []MenuGroup
+	if err := json.Unmarshal([]byte(row.Value), &raw); err != nil {
+		return []MenuGroup{}
+	}
+	out := make([]MenuGroup, 0, len(raw))
+	seenGroups := make(map[string]bool, len(raw))
+	seenItems := make(map[string]bool)
+	for _, g := range raw {
+		id := strings.TrimSpace(g.ID)
+		title := strings.TrimSpace(g.Title)
+		if !menuGroupIDPattern.MatchString(id) || seenGroups[id] {
+			continue
+		}
+		if titleLen := utf8.RuneCountInString(title); titleLen == 0 || titleLen > 20 {
+			continue
+		}
+		seenGroups[id] = true
+		items := make([]string, 0, len(g.Items))
+		for _, item := range g.Items {
+			if validGroupableMenuKey(item) && !seenItems[item] {
+				seenItems[item] = true
+				items = append(items, item)
+			}
+		}
+		out = append(out, MenuGroup{
+			ID:    id,
+			Title: title,
+			Icon:  normalizeMenuGroupIcon(id, strings.TrimSpace(g.Icon)),
+			Items: items,
+		})
+	}
+	return out
+}
+
+func (m *Module) readHiddenMenus() []string {
+	return m.readMenuList(hiddenMenusSettingKey, validHideableMenuKey)
+}
+
+func (m *Module) readMenuOrder(groups []MenuGroup) []string {
+	validGroups := make(map[string]bool, len(groups)+1)
+	validGroups[menuGroupKeyPrefix+"extensions"] = true
+	for _, g := range groups {
+		validGroups[menuGroupKeyPrefix+g.ID] = true
+	}
+	return m.readMenuList(menuOrderSettingKey, func(key string) bool {
+		return validGroupableMenuKey(key) || validGroups[key]
+	})
+}
+
+func (m *Module) menus(c *gin.Context) {
+	var in struct {
+		HiddenMenus []string    `json:"hiddenMenus"`
+		MenuOrder   []string    `json:"menuOrder"`
+		MenuGroups  []MenuGroup `json:"menuGroups"`
+	}
+	if !response.Bind(c, &in) {
+		return
+	}
+
+	var cleanHidden []string
+	if in.HiddenMenus != nil {
+		cleanHidden = make([]string, 0, len(in.HiddenMenus))
+		for _, key := range in.HiddenMenus {
+			if lockedMenuKeys[key] {
+				response.Fail(c, response.Invalid, "该菜单不可隐藏")
+				return
+			}
+			if !validHideableMenuKey(key) {
+				response.Fail(c, response.Invalid, "菜单标识无效")
+				return
+			}
+			if !slices.Contains(cleanHidden, key) {
+				cleanHidden = append(cleanHidden, key)
+			}
+		}
+	}
+
+	var cleanGroups []MenuGroup
+	if in.MenuGroups != nil {
+		if len(in.MenuGroups) > 20 {
+			response.Fail(c, response.Invalid, "菜单分组数量不能超过 20 个")
+			return
+		}
+		cleanGroups = make([]MenuGroup, 0, len(in.MenuGroups))
+		seenGroups := make(map[string]bool, len(in.MenuGroups))
+		seenItems := make(map[string]bool)
+		for _, g := range in.MenuGroups {
+			id := strings.TrimSpace(g.ID)
+			if !menuGroupIDPattern.MatchString(id) || seenGroups[id] {
+				response.Fail(c, response.Invalid, "菜单分组标识无效或重复")
+				return
+			}
+			seenGroups[id] = true
+			title := strings.TrimSpace(g.Title)
+			if titleLen := utf8.RuneCountInString(title); titleLen == 0 || titleLen > 20 {
+				response.Fail(c, response.Invalid, "菜单分组名称长度需在 1–20 个字符之间")
+				return
+			}
+			items := make([]string, 0, len(g.Items))
+			for _, item := range g.Items {
+				if !validGroupableMenuKey(item) {
+					response.Fail(c, response.Invalid, "分组内包含无效或不可分组的菜单")
+					return
+				}
+				if slices.Contains(items, item) {
+					continue
+				}
+				if seenItems[item] {
+					response.Fail(c, response.Invalid, "同一菜单不能同时属于多个分组")
+					return
+				}
+				seenItems[item] = true
+				items = append(items, item)
+			}
+			cleanGroups = append(cleanGroups, MenuGroup{
+				ID:    id,
+				Title: title,
+				Icon:  normalizeMenuGroupIcon(id, strings.TrimSpace(g.Icon)),
+				Items: items,
+			})
+		}
+	}
+
+	var cleanOrder []string
+	if in.MenuOrder != nil {
+		activeGroups := cleanGroups
+		if in.MenuGroups == nil {
+			activeGroups = m.readMenuGroups()
+		}
+		validGroupKeys := make(map[string]bool, len(activeGroups))
+		for _, g := range activeGroups {
+			validGroupKeys[menuGroupKeyPrefix+g.ID] = true
+		}
+		cleanOrder = make([]string, 0, len(in.MenuOrder))
+		for _, key := range in.MenuOrder {
+			if !validGroupableMenuKey(key) && !validGroupKeys[key] {
+				response.Fail(c, response.Invalid, "菜单顺序标识无效")
+				return
+			}
+			if !slices.Contains(cleanOrder, key) {
+				cleanOrder = append(cleanOrder, key)
+			}
+		}
+	}
+
+	err := m.db.Transaction(func(tx *gorm.DB) error {
+		saveJSON := func(key string, val any) error {
+			encoded, err := json.Marshal(val)
+			if err != nil {
+				return err
+			}
+			return tx.Save(&store.Setting{Key: key, Value: string(encoded)}).Error
+		}
+		if in.HiddenMenus != nil {
+			if err := saveJSON(hiddenMenusSettingKey, cleanHidden); err != nil {
+				return err
+			}
+		}
+		if in.MenuGroups != nil {
+			if err := saveJSON(menuGroupsSettingKey, cleanGroups); err != nil {
+				return err
+			}
+		}
+		if in.MenuOrder != nil {
+			if err := saveJSON(menuOrderSettingKey, cleanOrder); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		response.Fail(c, response.Internal, "")
+		return
+	}
+	m.read(c)
 }
 func (m *Module) basic(c *gin.Context) {
 	var in struct {
@@ -141,10 +437,6 @@ func (m *Module) account(c *gin.Context) {
 		return
 	}
 	user := auth.Current(c).User
-	if e := m.auth.ConfirmPassword(m.auth.ClientIP(c), user, in.CurrentPassword); e != nil {
-		failed(c, e)
-		return
-	}
 	values := map[string]any{"username": in.Username, "auth_version": gorm.Expr("auth_version + 1")}
 	if in.NewPassword != "" {
 		if e := auth.ValidatePassword(in.NewPassword); e != nil {
@@ -181,20 +473,60 @@ func (m *Module) network(c *gin.Context) {
 	m.networkMu.Lock()
 	defer m.networkMu.Unlock()
 	var in struct {
-		BoundDomain   string  `json:"boundDomain"`
-		SSLEnabled    bool    `json:"sslEnabled"`
-		Certificate   string  `json:"certificate"`
-		CertificateID string  `json:"certificateId"`
-		PrivateKey    string  `json:"privateKey"`
-		Port          *int    `json:"port"`
-		Entry         *string `json:"entry"`
+		BoundDomain      *string `json:"boundDomain"`
+		SSLEnabled       *bool   `json:"sslEnabled"`
+		Certificate      string  `json:"certificate"`
+		CertificateID    string  `json:"certificateId"`
+		PrivateKey       string  `json:"privateKey"`
+		Port             *int    `json:"port"`
+		Entry            *string `json:"entry"`
+		UserAgentEnabled *bool   `json:"userAgentEnabled"`
+		UserAgentAllow   *string `json:"userAgentAllow"`
+		UnauthStatus     *int    `json:"unauthStatus"`
+		UnauthHTML       *string `json:"unauthHtml"`
 	}
 	if !response.Bind(c, &in) {
 		return
 	}
+	policyChanged := in.UserAgentEnabled != nil || in.UserAgentAllow != nil || in.UnauthStatus != nil || in.UnauthHTML != nil
+	var policy auth.SecurityPolicy
+	if policyChanged {
+		policy = m.auth.SecurityPolicy()
+		if in.UserAgentEnabled != nil {
+			policy.UserAgentEnabled = *in.UserAgentEnabled
+		}
+		if in.UserAgentAllow != nil {
+			policy.UserAgentAllow = *in.UserAgentAllow
+		}
+		if in.UnauthStatus != nil {
+			policy.UnauthStatus = *in.UnauthStatus
+		}
+		if in.UnauthHTML != nil {
+			policy.UnauthHTML = *in.UnauthHTML
+		}
+	}
 	old := m.cfg.Current()
 	oldOrigin := m.auth.RequestOrigin(c)
-	nextDomain := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(in.BoundDomain), "."))
+	hasCertificate := in.Certificate != "" || in.CertificateID != "" || in.PrivateKey != ""
+	if in.BoundDomain == nil && in.SSLEnabled == nil && in.Port == nil && in.Entry == nil && !hasCertificate {
+		if policyChanged {
+			if err := m.auth.SaveSecurityPolicy(c.Request.Context(), c.Request.UserAgent(), policy); err != nil {
+				failed(c, err)
+				return
+			}
+		}
+		response.OK(c, gin.H{"publicUrl": old.PublicURL, "loginRequired": false, "loginUrl": oldOrigin.String() + "/" + old.Entry})
+		return
+	}
+
+	nextDomain := old.BoundDomain
+	if in.BoundDomain != nil {
+		nextDomain = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(*in.BoundDomain), "."))
+	}
+	sslEnabled := old.TLSCert != ""
+	if in.SSLEnabled != nil {
+		sslEnabled = *in.SSLEnabled
+	}
 	host := nextDomain
 	if host == "" {
 		origin := oldOrigin
@@ -208,11 +540,22 @@ func (m *Module) network(c *gin.Context) {
 			host = old.LocalListenHost()
 		}
 	}
-	certPath, keyPath := "", ""
+	certPath, keyPath, certificateID := "", "", ""
 	// 一对证书放在独立目录，配置只在全部写好后切换，API永不回显私钥。
 	var staged string
-	if in.SSLEnabled {
-		if in.CertificateID != "" {
+	if sslEnabled && !hasCertificate && old.TLSCert != "" && nextDomain == old.BoundDomain {
+		certPath, keyPath, certificateID = old.TLSCert, old.TLSKey, old.PanelCertificateID
+	} else if sslEnabled {
+		if !hasCertificate && old.TLSCert != "" {
+			var err error
+			var data []byte
+			data, err = os.ReadFile(old.TLSCert)
+			if err != nil {
+				failed(c, err)
+				return
+			}
+			in.Certificate, in.CertificateID = string(data), old.PanelCertificateID
+		} else if in.CertificateID != "" {
 			var err error
 			in.Certificate, in.PrivateKey, err = certificate.ReadPEM(m.db, old, in.CertificateID)
 			if err != nil {
@@ -255,6 +598,7 @@ func (m *Module) network(c *gin.Context) {
 			}
 			in.CertificateID = stored.ID
 		}
+		certificateID = in.CertificateID
 		base := filepath.Join(old.DataDir(), "panel-ssl")
 		if e = os.MkdirAll(base, 0700); e != nil {
 			failed(c, e)
@@ -292,16 +636,13 @@ func (m *Module) network(c *gin.Context) {
 		out.BoundDomain = nextDomain
 		out.TLSCert = certPath
 		out.TLSKey = keyPath
-		out.PanelCertificateID = ""
-		if in.SSLEnabled {
-			out.PanelCertificateID = in.CertificateID
-		}
+		out.PanelCertificateID = certificateID
 		// 只修改端口或安全入口时，继续允许使用任一有效的服务器 IP 直连。
-		if old.DirectIPAccess() && nextDomain == "" && !in.SSLEnabled {
+		if old.DirectIPAccess() && nextDomain == "" && !sslEnabled {
 			return nil
 		}
 		scheme := "http"
-		if in.SSLEnabled {
+		if sslEnabled {
 			scheme = "https"
 		}
 		out.PublicURL = scheme + "://" + net.JoinHostPort(host, strconv.Itoa(out.Port))
@@ -355,7 +696,12 @@ func (m *Module) network(c *gin.Context) {
 	}
 	nextOrigin := next.PanelOrigin(oldOrigin.Hostname()).String()
 	loginRequired := nextOrigin != oldOrigin.String()
-	if loginRequired {
+	if policyChanged {
+		if e = m.auth.ApplySecurityPolicy(c.Request.Context(), c.Request.UserAgent(), policy, loginRequired); e != nil {
+			restoreNetwork(e)
+			return
+		}
+	} else if loginRequired {
 		if e = m.db.Model(&store.User{}).Where("id > 0").Update("auth_version", gorm.Expr("auth_version + 1")).Error; e != nil {
 			restoreNetwork(errors.New("无法刷新面板登录会话"))
 			return

@@ -13,20 +13,55 @@ import (
 	"ezpanel/internal/auth"
 	"ezpanel/internal/config"
 	"ezpanel/internal/executor"
+	"ezpanel/internal/hardening"
 	"ezpanel/internal/response"
 	"github.com/gin-gonic/gin"
 )
 
 type Module struct {
-	cfg  config.Config
-	auth *auth.Service
-	mu   sync.Mutex
+	cfg       config.Config
+	auth      *auth.Service
+	mu        sync.Mutex
+	hardening *hardening.Manager
 }
 
 func New(cfg config.Config, a *auth.Service) *Module { return &Module{cfg: cfg, auth: a} }
 func (m *Module) Name() string                       { return "security" }
+
+type PluginSecurityStatus struct {
+	FirewallEnabled    bool       `json:"firewallEnabled"`
+	FirewallRules      int        `json:"firewallRules"`
+	HardeningEnabled   bool       `json:"hardeningEnabled"`
+	HardeningRules     int        `json:"hardeningRules"`
+	HardeningCheckedAt *time.Time `json:"hardeningCheckedAt,omitempty"`
+}
+
+func (m *Module) PluginStatus() (PluginSecurityStatus, error) {
+	m.mu.Lock()
+	firewall, err := m.readFirewall()
+	m.mu.Unlock()
+	if err != nil {
+		return PluginSecurityStatus{}, err
+	}
+	var state hardening.State
+	if m.hardening != nil {
+		state = m.hardening.State()
+	}
+	return PluginSecurityStatus{
+		FirewallEnabled: firewall.Enabled, FirewallRules: len(firewall.Rules),
+		HardeningEnabled: state.Enabled, HardeningRules: len(state.Rules), HardeningCheckedAt: state.CheckedAt,
+	}, nil
+}
+
+func (m *Module) ScanHardening() error {
+	if m.hardening == nil {
+		return errors.New("系统加固模块未初始化")
+	}
+	return m.hardening.Scan()
+}
 func (m *Module) Routes(g *gin.RouterGroup) {
 	r := g.Group("/api/security")
+	m.hardeningRoutes(r)
 	r.GET("/firewall", m.firewall)
 	r.PUT("/firewall", m.firewallSettings)
 	r.POST("/firewall/rules", m.saveRule)

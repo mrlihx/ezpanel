@@ -79,21 +79,22 @@ func (m *Manager) ChangeFTPUser(ctx context.Context, action string, in FTPUser) 
 	if (action == "create" || in.Password != "") && (len(in.Password) < 10 || len(in.Password) > 128) {
 		return errors.New("请输入 10 到 128 字节的 FTP 密码")
 	}
-	state, err := m.Status(ctx, "ftp")
-	if err != nil {
-		return err
-	}
-	if !state.Manageable {
-		return ErrUnsupported
-	}
-	db, err := m.ftpAuthPath(state)
-	if err != nil {
-		return err
-	}
-	rows, err := readFTPUsers(db)
-	if err != nil {
-		return err
-	}
+	return m.ApplicationChange("ftp", func() error {
+		state, err := m.Status(ctx, "ftp")
+		if err != nil {
+			return err
+		}
+		if !state.Manageable {
+			return ErrUnsupported
+		}
+		db, err := m.ftpAuthPath(state)
+		if err != nil {
+			return err
+		}
+		rows, err := readFTPUsers(db)
+		if err != nil {
+			return err
+		}
 	present := false
 	off := map[string]bool{}
 	for _, row := range rows {
@@ -226,4 +227,5 @@ func (m *Manager) ChangeFTPUser(ctx context.Context, action string, in FTPUser) 
 		return nil
 	}
 	return m.writeFTPValues(ctx, state, map[string]string{"PureDB": db})
+	})
 }

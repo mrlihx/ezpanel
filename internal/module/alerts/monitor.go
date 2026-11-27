@@ -20,8 +20,20 @@ type target struct {
 	Name string `json:"name"`
 }
 
+type PluginCheck struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type PluginChecks interface {
+	MonitorChecks(context.Context) ([]PluginCheck, error)
+	RunMonitorCheck(context.Context, string) (name, problem string, err error)
+}
+
+func (m *Module) SetPluginChecks(checks PluginChecks) { m.checks = checks }
+
 var projectTypes = []string{"go", "python", "nodejs"}
-var databaseTypes = []string{"mysql", "mongodb", "redis", "memcached"}
+var databaseTypes = []string{"mysql", "postgresql", "mongodb", "redis", "memcached"}
 
 func (m *Module) targets(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -48,6 +60,14 @@ func (m *Module) targets(c *gin.Context) {
 		err = db.Model(&store.Website{}).Select("id, name").Where("project_type IN ?", projectTypes).Order("name, id").Find(&rows).Error
 	case "certificate":
 		err = db.Table("websites AS w").Select("w.id, w.name").Joins("JOIN certificates AS cert ON cert.id = w.certificate_id").Where("w.ssl_enabled = ?", true).Order("w.name, w.id").Find(&rows).Error
+	case "plugin":
+		if m.checks != nil {
+			var checks []PluginCheck
+			checks, err = m.checks.MonitorChecks(ctx)
+			for _, check := range checks {
+				rows = append(rows, target(check))
+			}
+		}
 	default:
 		response.Fail(c, response.Invalid, "告警类型无效")
 		return
@@ -106,6 +126,11 @@ func (m *Module) checkTarget(ctx context.Context, in RuleInput, now time.Time) (
 			problem = fmt.Sprintf("%s 使用的 HTTPS 证书到期时间为 %s", row.Name, row.NotAfter.Format(time.RFC3339))
 		}
 		return row.Name, problem, nil
+	case "plugin":
+		if m.checks != nil {
+			return m.checks.RunMonitorCheck(ctx, in.Target)
+		}
+		return "", "", errors.New("未配置插件检测")
 	default:
 		return "", "", errors.New("告警类型无效")
 	}

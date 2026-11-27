@@ -24,11 +24,13 @@ import './DirectoryPicker.css';
 export default function FilePicker({
   title = '选择文件',
   initialPath = '/',
+  allowDirectories = false,
   onSelect,
   onClose,
 }: {
   title?: string;
   initialPath?: string;
+  allowDirectories?: boolean;
   onSelect: (path: string) => void;
   onClose: () => void;
 }) {
@@ -76,10 +78,12 @@ export default function FilePicker({
       width={LAYOUT.trashModalWidth}
       onCancel={onClose}
       onOk={() => {
-        if (selected) onSelect(selected);
+        const target = selected ?? (allowDirectories ? current : undefined);
+        if (target) onSelect(target);
       }}
       okButtonProps={{
-        disabled: !selected || query.isFetching || !!query.error,
+        disabled:
+          (!selected && !allowDirectories) || query.isFetching || !!query.error,
       }}
       okText="确认"
     >
@@ -140,13 +144,13 @@ export default function FilePicker({
           selectedRowKeys: selected ? [selected] : [],
           onChange: (keys) => setSelected(String(keys[0])),
           getCheckboxProps: (row) => ({
-            disabled: row.protected || row.isDir,
+            disabled: row.protected || (row.isDir && !allowDirectories),
           }),
         }}
         onRow={(row) => ({
           onClick: () => {
             if (row.protected) return;
-            if (!row.isDir) setSelected(row.path);
+            if (!row.isDir || allowDirectories) setSelected(row.path);
           },
           onDoubleClick: () => {
             if (row.protected) return;
@@ -212,10 +216,16 @@ export default function FilePicker({
         ]}
       />
       <div style={{ marginTop: 12 }}>
-        <Typography.Text>当前选中文件：</Typography.Text>
+        <Typography.Text>
+          {allowDirectories ? '当前选择：' : '当前选中文件：'}
+        </Typography.Text>
         <Input
-          value={selected ?? ''}
-          placeholder="请在上方列表点击选择文件（双击文件夹进入目录）"
+          value={selected ?? (allowDirectories ? current : '')}
+          placeholder={
+            allowDirectories
+              ? '选择文件或目录，双击文件夹进入目录'
+              : '请在上方列表点击选择文件（双击文件夹进入目录）'
+          }
           readOnly
           aria-label="当前选中文件"
         />

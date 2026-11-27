@@ -4,9 +4,94 @@ import (
 	"context"
 	"errors"
 	"ezpanel/internal/executor"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestEnableSystemdStartupRestoresServiceAndStaticTrigger(t *testing.T) {
+	for _, tc := range []struct{ name, serviceState, trigger, want string }{
+		{name: "service", serviceState: "disabled", want: "enable app.service"},
+		{name: "static service with socket", serviceState: "static", trigger: "app.socket", want: "enable app.socket"},
+		{name: "already enabled", serviceState: "enabled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New()
+			var enable string
+			m.Run = func(_ context.Context, _ time.Duration, _ []string, cmd string, args ...string) (executor.Result, error) {
+				if cmd != systemctlPath {
+					t.Errorf("unexpected command %s", cmd)
+				}
+				switch strings.Join(args, " ") {
+				case "show app.service --property=TriggeredBy --value":
+					return executor.Result{Stdout: tc.trigger}, nil
+				case "is-enabled app.service":
+					if tc.serviceState == "disabled" {
+						return executor.Result{Stdout: "disabled", ExitCode: 1}, errors.New("disabled")
+					}
+					return executor.Result{Stdout: tc.serviceState}, nil
+				case "is-enabled app.socket":
+					return executor.Result{Stdout: "disabled", ExitCode: 1}, errors.New("disabled")
+				case "enable app.service", "enable app.socket":
+					enable = strings.Join(args, " ")
+					return executor.Result{}, nil
+				default:
+					t.Errorf("unexpected systemctl arguments: %v", args)
+					return executor.Result{}, nil
+				}
+			}
+			if err := m.enableSystemdStartup(t.Context(), time.Second, "app.service"); err != nil {
+				t.Fatal(err)
+			}
+			if enable != tc.want {
+				t.Errorf("persisted boot startup with %q, want %q", enable, tc.want)
+			}
+		})
+	}
+}
+
+func TestStopDockerDisablesServiceAndSocket(t *testing.T) {
+	m := New()
+	m.ReadFile = func(path string) ([]byte, error) {
+		if path == "/etc/os-release" {
+			return []byte("ID=ubuntu\n"), nil
+		}
+		return []byte("systemd\n"), nil
+	}
+	m.LookPath = func(name string) (string, error) { return "/usr/bin/" + name, nil }
+	running := true
+	m.Run = func(_ context.Context, _ time.Duration, _ []string, cmd string, args ...string) (executor.Result, error) {
+		switch {
+		case cmd == "/usr/bin/dpkg-query" && args[0] == "-W":
+			return executor.Result{Stdout: "docker.io\tinstalled\n"}, nil
+		case cmd == "/usr/bin/dpkg-query" && args[0] == "-S":
+			return executor.Result{Stdout: "docker.io: /usr/bin/dockerd\n"}, nil
+		case cmd == "/usr/bin/dockerd" && args[0] == "--version":
+			return executor.Result{Stdout: "Docker version 29.1.3"}, nil
+		case cmd == systemctlPath:
+			switch strings.Join(args, " ") {
+			case "show docker.service --property=LoadState --value":
+				return executor.Result{Stdout: "loaded\n"}, nil
+			case "is-active docker.service":
+				if running {
+					return executor.Result{Stdout: "active\n"}, nil
+				}
+				return executor.Result{Stdout: "inactive\n"}, nil
+			case "show docker.service --property=TriggeredBy --value":
+				return executor.Result{Stdout: "docker.socket\n"}, nil
+			case "disable --now docker.service docker.socket":
+				running = false
+				return executor.Result{}, nil
+			}
+		}
+		t.Fatalf("意外的命令 %s %v", cmd, args)
+		return executor.Result{}, nil
+	}
+	state, err := m.Service(context.Background(), "docker", "stop")
+	if err != nil || running || state.Running == nil || *state.Running {
+		t.Fatalf("停止服务并关闭自启动失败：%+v，%v", state, err)
+	}
+}
 
 func TestWhitelist(t *testing.T) {
 	m := New()

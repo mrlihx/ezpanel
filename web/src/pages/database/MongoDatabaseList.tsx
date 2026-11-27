@@ -1,9 +1,11 @@
 import { useState } from 'react';
+import ResourceActions, {
+  useResourceActions,
+} from '../../plugins/ResourceActions';
 import {
   Alert,
   App,
   Button,
-  Checkbox,
   Flex,
   Form,
   Input,
@@ -21,6 +23,7 @@ import InlineRemark from '../../components/InlineRemark';
 import BackupsModal from '../../components/BackupsModal';
 import TaskDrawer from '../../components/TaskDrawer';
 import { LAYOUT } from '../../styles/tokens';
+import DatabaseSelectAll from './DatabaseSelectAll';
 
 export type MongoDatabase = {
   name: string;
@@ -57,6 +60,7 @@ export default function MongoDatabaseList({
   onDelete: (name: string, connectionId?: string) => void;
   onChanged: () => void;
 }) {
+  const pluginActions = useResourceActions('databases');
   const fixedActions = Grid.useBreakpoint().lg ? 'right' : undefined;
   const { message, modal } = App.useApp();
   const [page, setPage] = useState(1),
@@ -64,7 +68,7 @@ export default function MongoDatabaseList({
   const [selected, setSelected] = useState<React.Key[]>([]);
   const [action, setAction] = useState<Action>('password');
   const [operation, setOperation] = useState<{
-    action: Action;
+    action: Action | 'createAccount';
     names: string[];
     targetPrefix: string;
   }>();
@@ -83,12 +87,9 @@ export default function MongoDatabaseList({
     Math.max(1, Math.ceil(rows.length / size)),
   );
   const pageRows = rows.slice((currentPage - 1) * size, currentPage * size);
-  const names = selected
-    .map(String)
-    .filter((name) => rows.some((row) => row.name === name));
-  const selectedPage = pageRows.filter((row) =>
-    selected.includes(row.name),
-  ).length;
+  const rowKey = (row: MongoDatabase) =>
+    `${row._connectionId || connectionId}:${row.name}`;
+  const selectedRows = rows.filter((row) => selected.includes(rowKey(row)));
   async function submit(
     selectedAction: Action,
     databases: string[],
@@ -121,26 +122,21 @@ export default function MongoDatabaseList({
     }
   }
   function open(
-    selectedAction: Action,
-    databases: string[],
-    explicitPrefix?: string,
+    selectedAction: Action | 'createAccount',
+    databases: MongoDatabase[],
   ) {
     if (databases.length > 100) {
       message.info('每批最多操作100个数据库');
       return;
     }
-    let resolvedPrefix = explicitPrefix || prefix;
-    if (!explicitPrefix) {
-      const matched = rows.filter((row) => databases.includes(row.name));
-      const prefixes = new Set(matched.map((row) => row._prefix || prefix));
-      if (prefixes.size > 1) {
-        message.warning(
-          '批量操作仅支持同一 MongoDB 实例下的数据库，请先筛选单个实例',
-        );
-        return;
-      }
-      resolvedPrefix = [...prefixes][0] || prefix;
+    const resolvedPrefix = databases[0]?._prefix || prefix;
+    if (databases.some((row) => (row._prefix || prefix) !== resolvedPrefix)) {
+      message.warning(
+        '批量操作仅支持同一 MongoDB 实例下的数据库，请先筛选单个实例',
+      );
+      return;
     }
+    const names = databases.map((row) => row.name);
     form.resetFields();
     setConfirmation('');
     setVerify(false);
@@ -149,22 +145,20 @@ export default function MongoDatabaseList({
         title: `备份选中的${databases.length}个数据库？`,
         content:
           '使用mongodump创建本地BSON压缩归档，包含集合及索引定义。备份期间有写入时不保证跨集合时间点一致。',
-        onOk: () => submit('backup', databases, {}, resolvedPrefix),
+        onOk: () => submit('backup', names, {}, resolvedPrefix),
       });
     } else {
       setOperation({
         action: selectedAction,
-        names: databases,
+        names,
         targetPrefix: resolvedPrefix,
       });
       if (databases.length === 1)
         form.setFieldValue(
           'username',
-          rows.find(
-            (row) =>
-              row.name === databases[0] &&
-              (row._prefix || prefix) === resolvedPrefix,
-          )?.username,
+          selectedAction === 'createAccount'
+            ? databases[0].name
+            : databases[0].username,
         );
     }
   }
@@ -181,7 +175,7 @@ export default function MongoDatabaseList({
       <ContentSizedTable<MongoDatabase>
         fillColumn="name"
         growColumns={['username', 'remark']}
-        rowKey={(row) => `${row._connectionId || connectionId}:${row.name}`}
+        rowKey={rowKey}
         loading={loading}
         dataSource={rows}
         rowSelection={{
@@ -202,23 +196,12 @@ export default function MongoDatabaseList({
         }}
         footer={() => (
           <Flex align="center" gap={16} wrap>
-            <Checkbox
-              checked={pageRows.length > 0 && selectedPage === pageRows.length}
-              indeterminate={selectedPage > 0 && selectedPage < pageRows.length}
-              disabled={!pageRows.length || busy}
-              onChange={(event) => {
-                const pageNames = pageRows.map((row) => row.name);
-                setSelected(
-                  event.target.checked
-                    ? Array.from(new Set([...selected, ...pageNames]))
-                    : selected.filter(
-                        (key) => !pageNames.includes(String(key)),
-                      ),
-                );
-              }}
-            >
-              全选
-            </Checkbox>
+            <DatabaseSelectAll
+              pageKeys={pageRows.map(rowKey)}
+              selected={selected}
+              onChange={setSelected}
+              disabled={busy}
+            />
             <Select
               aria-label="批量操作类型"
               style={{ width: 144 }}
@@ -231,10 +214,10 @@ export default function MongoDatabaseList({
               ]}
             />
             <Button
-              disabled={!names.length || busy}
-              onClick={() => open(action, names)}
+              disabled={!selectedRows.length || busy}
+              onClick={() => open(action, selectedRows)}
             >
-              批量操作（已选{names.length}项）
+              批量操作（已选{selectedRows.length}项）
             </Button>
           </Flex>
         )}
@@ -242,6 +225,7 @@ export default function MongoDatabaseList({
           {
             title: '数据库名',
             dataIndex: 'name',
+            minWidth: 160,
             render: (name: string, row) => (
               <Button
                 type="link"
@@ -254,6 +238,7 @@ export default function MongoDatabaseList({
           {
             title: '用户名',
             key: 'username',
+            minWidth: 136,
             render: (_, row) => (
               <Tooltip title={row.userNotice}>
                 {row.userNotice
@@ -264,6 +249,7 @@ export default function MongoDatabaseList({
           },
           {
             title: '密码',
+            minWidth: 120,
             render: (_, row) => (
               <MongoPassword
                 key={`${row._connectionId || connectionId}-${row.name}-${row.hasPassword}-${row.username}-${passwordRevision}`}
@@ -274,6 +260,7 @@ export default function MongoDatabaseList({
           },
           {
             title: '备份',
+            minWidth: 102,
             render: (_, row) => (
               <Button
                 type="link"
@@ -292,6 +279,7 @@ export default function MongoDatabaseList({
           {
             title: '数据库位置',
             key: 'location',
+            minWidth: 132,
             width: 150,
             ellipsis: true,
             render: (_, row) => row._location || locationLabel || 'MongoDB',
@@ -299,6 +287,7 @@ export default function MongoDatabaseList({
           {
             title: '备注',
             key: 'remark',
+            minWidth: 136,
             width: 220,
             render: (_, row) => (
               <InlineRemark
@@ -317,6 +306,7 @@ export default function MongoDatabaseList({
           },
           {
             title: '操作',
+            minWidth: 128,
             fixed: fixedActions,
             width: 180,
             render: (_, row) => (
@@ -330,23 +320,18 @@ export default function MongoDatabaseList({
                 >
                   数据
                 </Button>
-                <Tooltip
-                  title={
-                    row.userNotice ||
-                    (!row.users.length
-                      ? '此库没有独立用户，请先在MongoDB中创建账号'
-                      : undefined)
-                  }
-                >
+                <Tooltip title={row.userNotice}>
                   <Button
                     type="link"
                     size="small"
-                    disabled={!row.users.length}
+                    disabled={!!row.userNotice && !row.users.length}
                     onClick={() =>
-                      open('password', [row.name], row._prefix || prefix)
+                      open(row.users.length ? 'password' : 'createAccount', [
+                        row,
+                      ])
                     }
                   >
-                    改密
+                    {row.users.length ? '改密' : '补建账号'}
                   </Button>
                 </Tooltip>
                 <Button
@@ -359,6 +344,13 @@ export default function MongoDatabaseList({
                 >
                   删除
                 </Button>
+                <ResourceActions
+                  items={pluginActions(
+                    row._connectionId || connectionId,
+                    row.name,
+                    'mongodb',
+                  )}
+                />
               </Space>
             ),
           },
@@ -382,7 +374,9 @@ export default function MongoDatabaseList({
         title={
           operation?.action === 'password'
             ? '修改MongoDB数据库密码'
-            : '删除MongoDB数据库'
+            : operation?.action === 'createAccount'
+              ? '补建 MongoDB 专属账号'
+              : '删除MongoDB数据库'
         }
         width={LAYOUT.databaseModalWidth}
         maskClosable={false}
@@ -396,6 +390,21 @@ export default function MongoDatabaseList({
             return;
           }
           const values = await form.validateFields();
+          if (operation.action === 'createAccount') {
+            setBusy(true);
+            try {
+              await request(
+                `${operation.targetPrefix}/databases/${encodeURIComponent(operation.names[0])}/account`,
+                { method: 'POST', data: values },
+              );
+              setOperation(undefined);
+              onChanged();
+              message.success('专属账号已创建');
+            } finally {
+              setBusy(false);
+            }
+            return;
+          }
           await submit(
             'password',
             operation.names,
@@ -415,7 +424,15 @@ export default function MongoDatabaseList({
           />
         ) : (
           <Form form={form} layout="vertical">
-            {passwordRow ? (
+            {operation?.action === 'createAccount' ? (
+              <Form.Item
+                name="username"
+                label="专属用户名"
+                rules={[{ required: true, max: 128 }]}
+              >
+                <Input autoComplete="off" />
+              </Form.Item>
+            ) : passwordRow ? (
               <Form.Item
                 name="username"
                 label="实际用户名"

@@ -62,6 +62,7 @@ sudo ezpanel reset-entry                 # 随机生成，也可指定 --entry
 sudo ezpanel reset-username --username admin_new
 sudo ezpanel reset-password              # 交互式输入，旧会话失效
 sudo ezpanel unlock-login --ip 192.0.2.10
+sudo ezpanel hardening-recover           # 紧急解除系统加固锁定
 ezpanel help
 ezpanel help reset-port
 ```

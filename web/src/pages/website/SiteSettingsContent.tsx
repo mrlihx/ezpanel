@@ -1,6 +1,17 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
-import { Alert, App, Button, Grid, Spin, Tabs, type TabsProps } from 'antd';
+import { lazy, Suspense, useState } from 'react';
+import {
+  Alert,
+  App,
+  Button,
+  Grid,
+  Space,
+  Spin,
+  Tabs,
+  type TabsProps,
+} from 'antd';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import { request } from '../../api/client';
 import {
   siteCertificate,
   saveSSL,
@@ -31,11 +42,15 @@ const SiteSslPanel = lazy(() => import('./SiteSslPanel'));
 const SiteRewritePanel = lazy(() => import('./SiteRewritePanel'));
 const SiteRedirectPanel = lazy(() => import('./SiteRedirectPanel'));
 const SiteConfigPanel = lazy(() => import('./SiteConfigPanel'));
+const PluginRuntime = lazy(() =>
+  import('../../plugins/PluginPage').then(({ PluginRuntime }) => ({
+    default: PluginRuntime,
+  })),
+);
 function useSiteSettingsContent({
   id,
   manageable,
   initialTab,
-  onTabChange,
   onChanged,
   site,
   pending,
@@ -45,23 +60,15 @@ function useSiteSettingsContent({
   id: string;
   manageable: boolean;
   initialTab?: string;
-  onTabChange?: (tab: string, replace?: boolean) => void;
   onChanged: () => void;
   sections: ReadonlyArray<{ key: string; label?: string }>;
 }) {
   const screens = Grid.useBreakpoint();
   const [newDomains, setNewDomains] = useState('');
   const { message, modal } = App.useApp();
-  const [localTab, setLocalTab] = useState(sections[0].key);
-  const tab = onTabChange ? (initialTab ?? sections[0].key) : localTab;
-  function setTab(next: string) {
-    if (onTabChange) onTabChange(next);
-    else setLocalTab(next);
-  }
-  useEffect(() => {
-    if (site.isSuccess && !initialTab && onTabChange)
-      onTabChange(sections[0].key, true);
-  }, [site.isSuccess, initialTab, onTabChange, sections]);
+  const [tab, setTab] = useState(
+    sections.find(({ key }) => key === initialTab)?.key ?? sections[0].key,
+  );
   const [error, setError] = useState('');
   const [cert, setCert] = useState<string | undefined>();
   const [rewrite, setRewrite] = useState<string | undefined>();
@@ -316,6 +323,19 @@ export default function SiteSettingsContent(
   } = useSiteSettingsContent(props);
   const { sections, initialTab } = props;
   const loadedSite = site.data;
+  const navigate = useNavigate();
+  const pluginActions = useQuery({
+    queryKey: ['plugins', 'site-actions', id],
+    enabled: !!loadedSite,
+    queryFn: ({ signal }) =>
+      request<
+        { pluginId: string; title: string; version: string; embed: boolean }[]
+      >(`/api/plugins/site-actions/${encodeURIComponent(id)}`, {
+        signal,
+        silentError: true,
+      }),
+  });
+  const launchActions = pluginActions.data?.filter((action) => !action.embed);
   const panels: NonNullable<TabsProps['items']> = loadedSite
     ? [
         {
@@ -564,12 +584,33 @@ export default function SiteSettingsContent(
         },
       ]
     : [];
-  const tabs = [...sections, { key: 'waf' }, { key: 'statistics' }].flatMap(
-    (section) => {
-      const panel = panels.find(({ key }) => key === section.key);
-      return panel ? [{ ...panel, ...section }] : [];
-    },
-  );
+  const tabs: NonNullable<TabsProps['items']> = [
+    ...sections,
+    { key: 'waf' },
+    { key: 'statistics' },
+  ].flatMap((section) => {
+    const panel = panels.find(({ key }) => key === section.key);
+    return panel ? [{ ...panel, ...section }] : [];
+  });
+  for (const action of pluginActions.data ?? []) {
+    if (!action.embed) continue;
+    const key = `plugin-${action.pluginId}`;
+    tabs.push({
+      key,
+      label: action.title,
+      children:
+        key === tab ? (
+          <Suspense fallback={<Spin />}>
+            <PluginRuntime
+              key={`${action.pluginId}:${action.version}:${id}`}
+              id={action.pluginId}
+              version={action.version}
+              embeddedSiteId={id}
+            />
+          </Suspense>
+        ) : null,
+    });
+  }
 
   return (
     <>
@@ -635,6 +676,26 @@ export default function SiteSettingsContent(
                 }
                 style={{ marginBottom: SPACING.lg }}
               />
+            )}
+            {!!launchActions?.length && (
+              <Space
+                wrap
+                size={SPACING.sm}
+                style={{ marginBottom: SPACING.md }}
+              >
+                {launchActions.map((action) => (
+                  <Button
+                    key={action.pluginId}
+                    onClick={() =>
+                      void navigate(
+                        `/p/${encodeURIComponent(action.pluginId)}?siteId=${encodeURIComponent(id)}`,
+                      )
+                    }
+                  >
+                    {action.title}
+                  </Button>
+                ))}
+              </Space>
             )}
             <Tabs
               className="website-settings-tabs"

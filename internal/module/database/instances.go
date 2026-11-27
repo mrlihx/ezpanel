@@ -11,7 +11,7 @@ import (
 )
 
 func (m *Module) localInstances(ctx context.Context, engine string) map[string]pkgmgr.DatabaseInstance {
-	rows, _ := m.packages.DatabaseInstances(ctx, engine)
+	rows, _ := m.packages.DatabaseInstanceSummaries(ctx, engine)
 	out := make(map[string]pkgmgr.DatabaseInstance, len(rows))
 	for _, row := range rows {
 		if row.ID != "default" && row.Port > 0 {

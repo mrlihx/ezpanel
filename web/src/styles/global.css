@@ -145,6 +145,21 @@ body {
   box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.18) !important;
 }
 
+/* 只读输入框隐藏闪烁编辑光标与聚焦高亮边框 */
+input[readonly],
+textarea[readonly],
+.ant-input[readonly] {
+  caret-color: transparent !important;
+  cursor: default !important;
+}
+
+.ant-input-outlined[readonly]:focus,
+.ant-input-affix-wrapper:has(input[readonly]):focus-within {
+  background-color: rgba(118, 118, 128, 0.08) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
 /* 搜索输入框（Input.Search）与右侧搜索按钮无缝拼接：靠近按钮一侧无圆角 */
 .ant-input-search
   > .ant-input-group

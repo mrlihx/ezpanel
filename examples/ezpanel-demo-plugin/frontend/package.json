@@ -1,0 +1,26 @@
+{
+  "name": "ezpanel-demo-plugin-ui",
+  "private": true,
+  "version": "0.2.1",
+  "type": "module",
+  "engines": {
+    "node": ">=24.22.1 <25"
+  },
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "postinstall": "node --input-type=module -e \"import {writeFileSync} from 'node:fs'; writeFileSync('node_modules/go.mod', 'module ezpanel/ezpanel-demo-plugin-dependencies\\n');\""
+  },
+  "dependencies": {
+    "@ant-design/icons": "5.6.1",
+    "antd": "5.29.3",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "typescript": "5.9.3",
+    "vite": "8.3.8"
+  }
+}

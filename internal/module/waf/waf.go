@@ -83,6 +83,15 @@ func (m *Module) Routes(g *gin.RouterGroup) {
 	r.DELETE("/exemptions/:id", m.deleteExemption)
 }
 
+func (m *Module) PluginStatus(ctx context.Context) (bool, error) {
+	cfg, err := m.loadGlobalConfig(ctx)
+	if err != nil || !cfg.Enabled {
+		return false, err
+	}
+	engine := m.engineStatus(ctx)
+	return engine.EngineMounted && engine.OpenRestyRunning, nil
+}
+
 func (m *Module) loadGlobalConfig(ctx context.Context) (GlobalConfig, error) {
 	cfg := DefaultGlobalConfig()
 	var row wafConfigRow
@@ -140,17 +149,37 @@ func (m *Module) overview(c *gin.Context) {
 	trendStart := ((nowUnix / 3600) - int64(hours-1)) * 3600
 
 	var todayBlocked, todayObserved, weekBlocked, activeBans int64
-	_ = m.wafDB.WithContext(ctx).Model(&Event{}).Where("occurred_at >= ? AND action != 'observe'", todayStart).Count(&todayBlocked).Error
-	_ = m.wafDB.WithContext(ctx).Model(&Event{}).Where("occurred_at >= ? AND action = 'observe'", todayStart).Count(&todayObserved).Error
-	_ = m.wafDB.WithContext(ctx).Model(&Event{}).Where("occurred_at >= ? AND action != 'observe'", sevenDaysStart).Count(&weekBlocked).Error
-	_ = m.wafDB.WithContext(ctx).Model(&Ban{}).Where("expires_at = 0 OR expires_at > ?", nowUnix).Count(&activeBans).Error
+	for _, q := range []struct {
+		query *gorm.DB
+		dest  *int64
+	}{
+		{m.wafDB.WithContext(ctx).Model(&Event{}).Where("occurred_at >= ? AND action != 'observe'", todayStart), &todayBlocked},
+		{m.wafDB.WithContext(ctx).Model(&Event{}).Where("occurred_at >= ? AND action = 'observe'", todayStart), &todayObserved},
+		{m.wafDB.WithContext(ctx).Model(&Event{}).Where("occurred_at >= ? AND action != 'observe'", sevenDaysStart), &weekBlocked},
+		{m.wafDB.WithContext(ctx).Model(&Ban{}).Where("expires_at = 0 OR expires_at > ?", nowUnix), &activeBans},
+	} {
+		if err := q.query.Count(q.dest).Error; err != nil {
+			response.Fail(c, response.System, "查询防护统计失败")
+			return
+		}
+	}
 
 	// 站点防护统计
-	cfg, _ := m.loadGlobalConfig(ctx)
+	cfg, err := m.loadGlobalConfig(ctx)
+	if err != nil {
+		response.Fail(c, response.System, "读取防护配置失败")
+		return
+	}
 	var websites []store.Website
-	_ = m.db.WithContext(ctx).Select("id, name, enabled").Find(&websites).Error
+	if err := m.db.WithContext(ctx).Select("id, name, enabled").Find(&websites).Error; err != nil {
+		response.Fail(c, response.System, "读取站点列表失败")
+		return
+	}
 	var policies []SitePolicy
-	_ = m.db.WithContext(ctx).Find(&policies).Error
+	if err := m.db.WithContext(ctx).Find(&policies).Error; err != nil {
+		response.Fail(c, response.System, "读取站点防护策略失败")
+		return
+	}
 	pm := make(map[string]SitePolicy, len(policies))
 	for _, p := range policies {
 		pm[p.SiteID] = p
@@ -182,7 +211,10 @@ func (m *Module) overview(c *gin.Context) {
 		Observed int64 `json:"observed"`
 	}
 	var statRows []HourlyStat
-	_ = m.wafDB.WithContext(ctx).Where("hour_ts >= ?", trendStart).Find(&statRows).Error
+	if err := m.wafDB.WithContext(ctx).Where("hour_ts >= ?", trendStart).Find(&statRows).Error; err != nil {
+		response.Fail(c, response.System, "查询趋势统计失败")
+		return
+	}
 	trendMap := map[int64]*trendPoint{}
 	groupMap := map[string]int64{}
 	siteHitMap := map[string]int64{}
@@ -777,10 +809,19 @@ func (m *Module) reconcileFirewallBan(ctx context.Context, tx *gorm.DB, ip strin
 	return m.firewall.BlockIPFromWAF(ctx, ip, ban.Reason, expiry)
 }
 
+func escapeLike(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
+}
+
 func (m *Module) listEvents(c *gin.Context) {
 	ctx := c.Request.Context()
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	rawSize := c.Query("page_size")
+	if rawSize == "" {
+		rawSize = c.DefaultQuery("pageSize", "20")
+	}
+	pageSize, _ := strconv.Atoi(rawSize)
 	if page < 1 {
 		page = 1
 	}
@@ -793,7 +834,7 @@ func (m *Module) listEvents(c *gin.Context) {
 		q = q.Where("site_id = ?", siteID)
 	}
 	if ip := strings.TrimSpace(c.Query("ip")); ip != "" {
-		q = q.Where("client_ip LIKE ?", "%"+ip+"%")
+		q = q.Where("client_ip LIKE ? ESCAPE '\\'", "%"+escapeLike(ip)+"%")
 	}
 	if group := strings.TrimSpace(c.Query("ruleGroup")); group != "" {
 		q = q.Where("rule_group = ?", group)
@@ -802,8 +843,8 @@ func (m *Module) listEvents(c *gin.Context) {
 		q = q.Where("action = ?", action)
 	}
 	if kw := strings.TrimSpace(c.Query("keyword")); kw != "" {
-		like := "%" + kw + "%"
-		q = q.Where("uri LIKE ? OR domain LIKE ? OR rule_name LIKE ? OR matched_data LIKE ?", like, like, like, like)
+		like := "%" + escapeLike(kw) + "%"
+		q = q.Where("uri LIKE ? ESCAPE '\\' OR domain LIKE ? ESCAPE '\\' OR rule_name LIKE ? ESCAPE '\\' OR matched_data LIKE ? ESCAPE '\\'", like, like, like, like)
 	}
 
 	var total int64

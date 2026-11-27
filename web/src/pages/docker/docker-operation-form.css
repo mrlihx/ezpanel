@@ -1,0 +1,61 @@
+.docker-create-form > .ant-form-item > .ant-form-item-row,
+.docker-create-limits > .ant-form-item > .ant-form-item-row {
+  flex-wrap: nowrap;
+}
+.docker-create-limits {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 24px;
+}
+.docker-create-limits .ant-form-item-control {
+  inline-size: 136px;
+  flex: 0 0 136px !important;
+}
+.docker-create-limits .ant-input-number-group-wrapper,
+.docker-create-port .ant-input-number {
+  width: 100%;
+}
+.docker-create-list .ant-form-item {
+  min-width: 0;
+  margin: 0;
+}
+.docker-create-port,
+.docker-create-mount {
+  display: grid;
+  align-items: start;
+  gap: 8px;
+  width: 100%;
+}
+.docker-create-port {
+  grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 1fr)) 76px auto;
+}
+.docker-create-mount {
+  grid-template-columns: 100px repeat(2, minmax(0, 1fr)) auto auto;
+}
+@media (max-width: 767px) {
+  .ant-form-horizontal .docker-create-limits .ant-form-item-row {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  .ant-form-horizontal .docker-create-limits .ant-form-item-label {
+    padding: 0 8px 0 0;
+  }
+}
+@media (max-width: 575px) {
+  .docker-create-limits .ant-form-item-label {
+    min-inline-size: 120px;
+  }
+  .docker-create-port,
+  .docker-create-mount {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  }
+  .docker-create-port > :first-child,
+  .docker-create-mount > :first-child {
+    grid-column: span 2;
+  }
+  .docker-create-port > :last-child,
+  .docker-create-mount > :last-child {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}

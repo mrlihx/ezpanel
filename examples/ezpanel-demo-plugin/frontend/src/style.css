@@ -1,0 +1,107 @@
+/*
+ * EzPanel 插件作用域样式规范：
+ * 所有选择器必须限定在 [data-panel-plugin="ezpanel-demo-plugin"] 内，
+ * 禁止覆盖 html / body / 全局 Ant Design 样式，避免污染宿主或其他组件。
+ */
+[data-panel-plugin="ezpanel-demo-plugin"] {
+  --cs-border: rgba(128, 128, 128, 0.22);
+  --cs-surface: rgba(128, 128, 128, 0.06);
+  --cs-surface-strong: rgba(128, 128, 128, 0.1);
+  --cs-code-bg: rgba(128, 128, 128, 0.12);
+  --cs-highlight-bg: rgba(22, 119, 255, 0.1);
+  min-width: 0;
+}
+
+[data-panel-plugin="ezpanel-demo-plugin"] .cs-root {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 2px 20px;
+  min-width: 0;
+}
+
+[data-panel-plugin="ezpanel-demo-plugin"] .cs-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--cs-border);
+  background: var(--cs-surface);
+}
+
+[data-panel-plugin="ezpanel-demo-plugin"] .cs-header-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+[data-panel-plugin="ezpanel-demo-plugin"] .cs-header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+[data-panel-plugin="ezpanel-demo-plugin"] .cs-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+[data-panel-plugin="ezpanel-demo-plugin"] .cs-kpi-card {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--cs-border);
+  background: var(--cs-surface);
+}
+
+[data-panel-plugin="ezpanel-demo-plugin"] .cs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+[data-panel-plugin="ezpanel-demo-plugin"] .cs-pre {
+  margin: 0;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--cs-code-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow: auto;
+  max-height: 320px;
+  max-width: 100%;
+  box-sizing: border-box;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+[data-panel-plugin="ezpanel-demo-plugin"] .cs-pre--nowrap {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+[data-panel-plugin="ezpanel-demo-plugin"] .cs-modal-pre {
+  max-height: 60vh;
+}
+
+[data-panel-plugin="ezpanel-demo-plugin"] .cs-row-highlight > td {
+  background: var(--cs-highlight-bg) !important;
+}
+
+[data-panel-plugin="ezpanel-demo-plugin"] .cs-loading {
+  padding: 48px 0;
+  text-align: center;
+}
+
+[data-panel-plugin="ezpanel-demo-plugin"] .cs-muted {
+  font-size: 12px;
+  opacity: 0.72;
+}

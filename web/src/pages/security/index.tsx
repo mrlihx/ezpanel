@@ -5,6 +5,7 @@ import { useRoutedTab } from '../../hooks/useRoutedTab';
 import RouteNotFound from '../../router/RouteNotFound';
 import Firewall from './Firewall';
 import SSH from './SSH';
+import Hardening from './Hardening';
 import './security.css';
 export default function SecurityPage() {
   const { section: requested, view } = useParams();
@@ -13,7 +14,11 @@ export default function SecurityPage() {
     loading,
     invalid,
     selectTab,
-  } = useRoutedTab('security', '/security', requested, ['firewall', 'ssh']);
+  } = useRoutedTab('security', '/security', requested, [
+    'firewall',
+    'ssh',
+    'hardening',
+  ]);
   if (invalid || (view && requested !== 'ssh'))
     return <RouteNotFound back="/security" />;
   if (loading) return <Skeleton active />;
@@ -25,9 +30,16 @@ export default function SecurityPage() {
         items={[
           { key: 'firewall', label: '系统防火墙' },
           { key: 'ssh', label: 'SSH管理' },
+          { key: 'hardening', label: '系统加固' },
         ]}
       />
-      {section === 'firewall' ? <Firewall /> : <SSH />}
+      {section === 'firewall' ? (
+        <Firewall />
+      ) : section === 'ssh' ? (
+        <SSH />
+      ) : (
+        <Hardening />
+      )}
     </div>
   );
 }

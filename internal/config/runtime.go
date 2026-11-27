@@ -59,6 +59,11 @@ func (c Config) Apply(change func(*Config) error) (Config, error) {
 	c.runtime.value.Store(&next)
 	return next, nil
 }
+var (
+	runtimePathPattern        = regexp.MustCompile(`^/[a-zA-Z0-9/._-]+$`)
+	runtimeDomainLabelPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+)
+
 func validatePanel(c Config) error {
 	switch c.PHPMyAdminPHPVersion {
 	case "", "7.4", "8.0", "8.1", "8.2", "8.3", "8.4", "8.5":
@@ -71,11 +76,11 @@ func validatePanel(c Config) error {
 	if !utf8.ValidString(c.Alias) || utf8.RuneCountInString(c.Alias) > 32 || strings.IndexFunc(c.Alias, unicode.IsControl) >= 0 {
 		return errors.New("面板别名最多32字，不能包含控制字符")
 	}
-	if c.IdleMinutes < 1 || c.IdleMinutes > 720 {
-		return errors.New("空闲超时须为1至720分钟")
+	if c.IdleMinutes < 60 || c.IdleMinutes > 168*60 || c.IdleMinutes%60 != 0 {
+		return errors.New("空闲超时须为1至168小时，按整小时设置")
 	}
 	for _, path := range []string{c.SiteRoot, c.BackupRoot} {
-		if !filepath.IsAbs(path) || filepath.Clean(path) != path || path == "/" || !regexp.MustCompile(`^/[a-zA-Z0-9/._-]+$`).MatchString(path) {
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path || path == "/" || !runtimePathPattern.MatchString(path) {
 			return errors.New("默认目录须为规范绝对路径，仅允许字母、数字和/._-")
 		}
 	}
@@ -84,7 +89,7 @@ func validatePanel(c Config) error {
 			return errors.New("绑定域名须为有效ASCII域名，不含协议或端口")
 		}
 		for _, part := range strings.Split(c.BoundDomain, ".") {
-			if !regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`).MatchString(part) {
+			if !runtimeDomainLabelPattern.MatchString(part) {
 				return errors.New("绑定域名格式无效")
 			}
 		}

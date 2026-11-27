@@ -2,6 +2,7 @@ import ApplicationSettingsForm from '../../components/ApplicationSettingsForm';
 import LogText from '../../components/LogText';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import ApplicationInstallGuide from '../../components/ApplicationInstallGuide';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
@@ -89,6 +90,14 @@ export function Fail2banRules() {
   if (query.isPending) return <Skeleton active />;
   if (query.error) return <Alert type="error" message={query.error.message} />;
   const { installed, running, rules } = query.data;
+  if (!installed)
+    return (
+      <ApplicationInstallGuide
+        name="Fail2ban"
+        install="fail2ban"
+        onDetect={() => void query.refetch()}
+      />
+    );
   const services = Object.keys(ports) as Service[];
   const rows = services.flatMap((service) => {
     const rule = rules[service];
@@ -97,12 +106,10 @@ export function Fail2banRules() {
   const available = services.filter((service) => !rules[service]?.maxRetry);
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      {installed && !running && (
-        <Alert type="info" showIcon message="Fail2ban 服务已停止" />
-      )}
+      {!running && <Alert type="info" showIcon message="Fail2ban 服务已停止" />}
       <Button
         type="primary"
-        disabled={!installed || !available.length}
+        disabled={!available.length}
         onClick={() => setEditing('new')}
       >
         创建规则

@@ -41,7 +41,7 @@ export default function ToolIpPanel({
   | 'setDNSRows'
 >) {
   return (
-    <>
+    <div className="tools-ip-settings">
       {ip.data && (
         <Card title="IP 设置">
           <IPSettings data={ip.data} onChanged={ip.refetch} />
@@ -224,6 +224,6 @@ export default function ToolIpPanel({
           )}
         </Card>
       }
-    </>
+    </div>
   );
 }

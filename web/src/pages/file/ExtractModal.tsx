@@ -29,6 +29,7 @@ export default function ExtractModal({
   const [form] = Form.useForm();
   const [picking, setPicking] = useState(false),
     [busy, setBusy] = useState(false);
+  const supportsPassword = /\.(zip|7z|rar)$/i.test(path);
   const accounts = useQuery({
     queryKey: ['file-identities'],
     queryFn: () => files<{ users: { name: string }[] }>('/identities'),
@@ -102,14 +103,15 @@ export default function ExtractModal({
             name="password"
             label="解压密码"
             extra={
-              path.toLowerCase().endsWith('.tar.gz')
-                ? 'tar.gz不支持解压密码，请留空。'
-                : undefined
+              !supportsPassword ? '当前格式不支持解压密码，请留空。' : undefined
             }
           >
             <Input.Password
               autoComplete="new-password"
-              placeholder="无密码则留空"
+              disabled={!supportsPassword}
+              placeholder={
+                supportsPassword ? '无密码则留空' : '当前格式不支持解压密码'
+              }
             />
           </Form.Item>
           <Form.Item name="encoding" label="编码">

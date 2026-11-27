@@ -77,11 +77,6 @@ export const saveCron = (id: string | undefined, data: CronInput) =>
     method: id ? 'PUT' : 'POST',
     data,
   });
-export const previewCron = (schedule: string) =>
-  request<{ timezone: string; scheduleDesc: string; nextRuns: string[] }>(
-    '/api/crons/preview',
-    { method: 'POST', data: { schedule } },
-  );
 export async function cronSites(projects: boolean) {
   const out: Website[] = [];
   let page = 1;

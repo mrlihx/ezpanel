@@ -85,12 +85,6 @@
   overflow: hidden;
   border-radius: 999px;
 }
-.security-ssh-field {
-  margin-bottom: 24px;
-}
-.security-ssh-field:last-child {
-  margin-bottom: 0;
-}
 @media (max-width: 800px) {
   .security-data-table {
     --content-sized-cell-padding: 8px;

@@ -61,7 +61,7 @@ func (m *Module) orders(c *gin.Context) {
 		return
 	}
 	var rows []store.CertificateOrder
-	if err := q.Order("created_at DESC,id DESC").Limit(100).Find(&rows).Error; err != nil {
+	if err := q.Order("CASE WHEN status = 'pending' THEN 0 ELSE 1 END, created_at DESC, id DESC").Limit(100).Find(&rows).Error; err != nil {
 		fail(c, err)
 		return
 	}
@@ -83,15 +83,16 @@ func validateOrder(domains []string, email, method, site string, terms bool) ([]
 	if !terms {
 		return nil, "", errors.New("申请前请同意Let's Encrypt服务条款")
 	}
-	address, err := mail.ParseAddress(strings.TrimSpace(email))
-	if err != nil || address.Address != strings.TrimSpace(email) || len(email) > 254 {
-		return nil, "", errors.New("请输入有效联系邮箱")
+	trimmedEmail := strings.TrimSpace(email)
+	if trimmedEmail != "" {
+		address, err := mail.ParseAddress(trimmedEmail)
+		if err != nil || address.Address != trimmedEmail || len(trimmedEmail) > 254 {
+			return nil, "", errors.New("请输入有效联系邮箱")
+		}
+		trimmedEmail = address.Address
 	}
 	if method != "http-01" && method != "dns-01" {
 		return nil, "", errors.New("验证方式无效")
-	}
-	if method == "http-01" && site == "" {
-		return nil, "", errors.New("HTTP验证需要选择已有网站，且域名在该站点监听公网80端口")
 	}
 	if len(domains) < 1 || len(domains) > 100 {
 		return nil, "", errors.New("每张证书支持1至100个域名")
@@ -117,17 +118,19 @@ func validateOrder(domains []string, email, method, site string, terms bool) ([]
 			names = append(names, domain)
 		}
 	}
-	return names, address.Address, nil
+	return names, trimmedEmail, nil
 }
 func (m *Module) createOrder(c *gin.Context) {
 	var in struct {
-		Domains     []string `json:"domains"`
-		Email       string   `json:"email"`
-		Method      string   `json:"method"`
-		Algorithm   string   `json:"algorithm"`
-		SiteID      string   `json:"siteId"`
-		RenewalID   string   `json:"renewalId"`
-		AcceptTerms bool     `json:"acceptTerms"`
+		Domains            []string `json:"domains"`
+		Email              string   `json:"email"`
+		Method             string   `json:"method"`
+		Algorithm          string   `json:"algorithm"`
+		SiteID             string   `json:"siteId"`
+		RenewalID          string   `json:"renewalId"`
+		AcceptTerms        bool     `json:"acceptTerms"`
+		DNSProvider        string   `json:"dnsProvider"`
+		InheritDNSProvider bool     `json:"inheritDNSProvider"`
 	}
 	if !response.Bind(c, &in) {
 		return
@@ -135,6 +138,7 @@ func (m *Module) createOrder(c *gin.Context) {
 	if in.Algorithm == "" {
 		in.Algorithm = "rsa2048"
 	}
+
 	switch in.Algorithm {
 	case "rsa2048", "rsa4096", "ecdsa256", "ecdsa384":
 	default:
@@ -183,10 +187,21 @@ func (m *Module) createOrder(c *gin.Context) {
 			}
 		}
 	}
+	if in.InheritDNSProvider && in.Method == "dns-01" && in.RenewalID != "" && in.DNSProvider == "" {
+		in.DNSProvider, err = m.latestDNSProvider(c.Request.Context(), in.RenewalID)
+		if err != nil {
+			fail(c, err)
+			return
+		}
+	}
+	if in.DNSProvider != "" && (in.Method != "dns-01" || m.dnsProviders == nil || !m.dnsProviders.DNSProviderReady(in.DNSProvider)) {
+		response.Fail(c, response.Invalid, "请选择运行中的 DNS 验证插件")
+		return
+	}
 	encoded, _ := json.Marshal(domains)
 	now := time.Now().UTC()
 	row := store.CertificateOrder{ID: store.ID(), Domains: string(encoded), Email: email, Method: in.Method, Algorithm: in.Algorithm, SiteID: in.SiteID, RenewalID: in.RenewalID, Status: "creating", Challenges: "[]", CreatedAt: now, UpdatedAt: now}
-	if err = m.db.Create(&row).Error; err != nil {
+	if err = m.createOrderRecord(row, in.DNSProvider); err != nil {
 		fail(c, err)
 		return
 	}
@@ -204,20 +219,63 @@ func (m *Module) completeOrder(c *gin.Context) {
 	}
 	m.submitOrder(c, row, true)
 }
-func (m *Module) submitOrder(c *gin.Context, row store.CertificateOrder, complete bool) {
-	lock := "certificate-order:" + row.ID
+func orderLock(row store.CertificateOrder) string {
 	if row.RenewalID != "" {
-		lock = "certificate:" + row.RenewalID
+		return "certificate:" + row.RenewalID
 	}
-	id, err := m.tasks.Submit(task.Meta{Module: "certificate", Action: "issue", Target: row.Email, ResourceID: row.ID, Username: auth.Current(c).User.Username, IP: m.auth.ClientIP(c), LockKey: lock}, func(ctx context.Context, log *task.Log) (any, error) {
+	return "certificate-order:" + row.ID
+}
+
+func (m *Module) cancelOrder(c *gin.Context) {
+	var row store.CertificateOrder
+	db := m.db.WithContext(c.Request.Context())
+	if err := db.Take(&row, "id = ?", c.Param("id")).Error; err != nil {
+		fail(c, err)
+		return
+	}
+	release, err := m.tasks.Acquire(orderLock(row))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	defer release()
+	result := db.Model(&row).Where("status = ? AND method = ?", "pending", "dns-01").
+		Updates(map[string]any{"status": "cancelled", "error": "", "challenges": "[]", "updated_at": time.Now().UTC()})
+	if result.Error != nil {
+		fail(c, result.Error)
+		return
+	}
+	if result.RowsAffected == 0 {
+		response.Fail(c, response.Conflict, "只能取消仍在等待 DNS 验证的申请")
+		return
+	}
+	response.OK(c, nil)
+}
+
+func (m *Module) submitOrder(c *gin.Context, row store.CertificateOrder, complete bool) {
+	target := row.Email
+	if target == "" {
+		target = row.ID
+	}
+	id, err := m.tasks.Submit(task.Meta{Module: "certificate", Action: "issue", Target: target, ResourceID: row.ID, Username: auth.Current(c).User.Username, IP: m.auth.ClientIP(c), LockKey: orderLock(row)}, func(ctx context.Context, log *task.Log) (any, error) {
 		ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 		defer cancel()
+		if complete {
+			var current store.CertificateOrder
+			if err := m.db.WithContext(ctx).Select("status").Take(&current, "id = ?", row.ID).Error; err != nil {
+				return nil, err
+			}
+			if current.Status != row.Status {
+				return nil, errors.New("证书申请状态已变化，请刷新后重试")
+			}
+		}
 		var err error
 		if row.AutoDeploy && row.CertificateID != "" {
 			err = m.deployIssued(ctx, row, log)
 		} else {
 			err = m.issue(ctx, row.ID, complete, log)
 		}
+		m.reportRenewal(row, log.TaskID(), err)
 		if err != nil {
 			summary := response.Summary(err.Error())
 			_ = m.db.Model(&store.CertificateOrder{}).Where("id = ?", row.ID).Updates(map[string]any{"status": "failed", "error": summary, "updated_at": time.Now().UTC()}).Error
@@ -243,8 +301,12 @@ func (m *Module) submitOrder(c *gin.Context, row store.CertificateOrder, complet
 func (m *Module) client(ctx context.Context, email string) (*acme.Client, error) {
 	m.accountMu.Lock()
 	defer m.accountMu.Unlock()
+	accountKey := strings.TrimSpace(email)
+	if accountKey == "" {
+		accountKey = "__default__"
+	}
 	var account store.ACMEAccount
-	err := m.db.First(&account, "email = ?", email).Error
+	err := m.db.First(&account, "email = ?", accountKey).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		key, e := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if e != nil {
@@ -258,7 +320,7 @@ func (m *Module) client(ctx context.Context, email string) (*acme.Client, error)
 		if e != nil {
 			return nil, e
 		}
-		account = store.ACMEAccount{Email: email, KeyEnc: encrypted}
+		account = store.ACMEAccount{Email: accountKey, KeyEnc: encrypted}
 		if e = m.db.Create(&account).Error; e != nil {
 			return nil, e
 		}
@@ -283,7 +345,11 @@ func (m *Module) client(ctx context.Context, email string) (*acme.Client, error)
 	}
 	client := &acme.Client{Key: signer, KID: acme.KeyID(account.URI), DirectoryURL: acme.LetsEncryptURL, HTTPClient: &http.Client{Timeout: 45 * time.Second}, UserAgent: "ezpanel"}
 	if account.URI == "" {
-		registered, e := client.Register(ctx, &acme.Account{Contact: []string{"mailto:" + email}}, acme.AcceptTOS)
+		var contact []string
+		if strings.TrimSpace(email) != "" {
+			contact = []string{"mailto:" + strings.TrimSpace(email)}
+		}
+		registered, e := client.Register(ctx, &acme.Account{Contact: contact}, acme.AcceptTOS)
 		if e != nil {
 			return nil, e
 		}
@@ -305,6 +371,13 @@ func (m *Module) issue(ctx context.Context, id string, complete bool, log *task.
 	}
 	var domains []string
 	_ = json.Unmarshal([]byte(row.Domains), &domains)
+	provider, err := m.dnsProvider(ctx, id)
+	if err != nil {
+		return err
+	}
+	if provider != "" && (m.dnsProviders == nil || !m.dnsProviders.DNSProviderReady(provider)) {
+		return errors.New("DNS 验证插件未运行")
+	}
 	client, err := m.client(ctx, row.Email)
 	if err != nil {
 		return err
@@ -314,9 +387,13 @@ func (m *Module) issue(ctx context.Context, id string, complete bool, log *task.
 		if m.prepareHTTP == nil {
 			return errors.New("HTTP验证未接入网站服务，请使用DNS验证")
 		}
-		root, err = m.prepareHTTP(ctx, row.SiteID, domains)
+		var cleanup func()
+		root, cleanup, err = m.prepareHTTP(ctx, row.SiteID, domains)
 		if err != nil {
 			return err
+		}
+		if cleanup != nil {
+			defer cleanup()
 		}
 	}
 	var order *acme.Order
@@ -429,7 +506,7 @@ func (m *Module) issue(ctx context.Context, id string, complete bool, log *task.
 	}
 	data, _ := json.Marshal(records)
 	status := "issuing"
-	if row.Method == "dns-01" && !complete {
+	if row.Method == "dns-01" && provider == "" && !complete {
 		status = "pending"
 	}
 	if err = m.db.Model(&store.CertificateOrder{}).Where("id = ?", id).Updates(map[string]any{"challenges": string(data), "status": status, "error": "", "updated_at": time.Now().UTC()}).Error; err != nil {
@@ -438,6 +515,13 @@ func (m *Module) issue(ctx context.Context, id string, complete bool, log *task.
 	if status == "pending" {
 		log.Line("请在DNS服务商添加界面所示TXT记录，生效后点击继续验证")
 		return nil
+	}
+	if provider != "" {
+		cleanup, err := m.publishDNS(ctx, provider, records, log)
+		defer cleanup()
+		if err != nil {
+			return err
+		}
 	}
 	// 泛域名与根域可能使用同名的两条TXT记录，逐个等待授权完成。
 	for _, authorization := range selected {

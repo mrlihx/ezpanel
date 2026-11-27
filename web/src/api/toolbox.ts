@@ -88,16 +88,6 @@ export type ToolboxData = {
     providers: MirrorProvider[];
   };
   commands: { list: SavedCommand[] };
-  kernel: {
-    list: {
-      key: string;
-      label: string;
-      min: number;
-      max: number;
-      value: string;
-      available: boolean;
-    }[];
-  };
   audit: {
     list: OpLog[];
     total: number;

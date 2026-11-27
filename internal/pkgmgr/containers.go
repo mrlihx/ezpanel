@@ -2,6 +2,7 @@ package pkgmgr
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -561,6 +562,19 @@ func (m *Manager) createServiceContainer(ctx context.Context, action []string, n
 	return err
 }
 
+func (m *Manager) freeContainerName(ctx context.Context, prefix string) (string, error) {
+	for {
+		name := prefix + strings.ToLower(rand.Text()[:6])
+		rows, err := m.docker(ctx, 5*time.Second, "ps", "-a", "--filter", "name=^/?"+name+"(-(previous|failed))?$", "--format", "{{.Names}}")
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(rows.Stdout) == "" {
+			return name, nil
+		}
+	}
+}
+
 func (m *Manager) pullContainer(ctx context.Context, reference, platform string, log func(string)) (string, error) {
 	if log == nil {
 		log = func(string) {}
@@ -640,6 +654,12 @@ func (m *Manager) dockerService(ctx context.Context, id, action string) (State, 
 		}
 		args := []string{action, "ezpanel-" + id}
 		if action == "remove" {
+			if IsDatabaseContainer(id) {
+				if err := m.checkDatabaseInstanceEmpty(ctx, id, "default", info); err != nil {
+					return err
+				}
+				args[1] = info.ID
+			}
 			args = []string{"rm", "-f", args[1]}
 		}
 		_, err = m.docker(ctx, 60*time.Second, args...)
@@ -673,11 +693,15 @@ func (m *Manager) OpenRestyCommand(ctx context.Context, args ...string) (executo
 	if info.State.Running || len(args) != 1 || (args[0] != "-t" && args[0] != "-T") {
 		return m.docker(ctx, 30*time.Second, append([]string{"exec", "ezpanel-openresty", "openresty", "-c", m.layout().OpenRestyConfig()}, args...)...)
 	}
-	image, err := m.docker(ctx, 5*time.Second, "inspect", "--format", "{{.Image}}", "ezpanel-openresty")
-	if err != nil {
-		return executor.Result{}, err
+	image := info.ImageID
+	if image == "" {
+		res, err := m.docker(ctx, 5*time.Second, "inspect", "--format", "{{.Image}}", "ezpanel-openresty")
+		if err != nil {
+			return executor.Result{}, err
+		}
+		image = strings.TrimSpace(res.Stdout)
 	}
-	return m.docker(ctx, 45*time.Second, "run", "--rm", "--volumes-from", "ezpanel-openresty", strings.TrimSpace(image.Stdout), "openresty", args[0], "-c", m.layout().OpenRestyConfig())
+	return m.docker(ctx, 45*time.Second, "run", "--rm", "--volumes-from", "ezpanel-openresty", image, "openresty", args[0], "-c", m.layout().OpenRestyConfig())
 }
 
 func (m *Manager) buildFPMImage(ctx context.Context, id, base, version string, log func(string)) (string, error) {

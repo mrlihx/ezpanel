@@ -92,38 +92,57 @@ var accessBytes = regexp.MustCompile(`\[([^\]]+)\] "[^"]*" [0-9]{3} ([0-9]+|-)`)
 
 // 列表不启动后台轮询；一分钟内复用结果，当前日志只追加读取新增完整行。
 func (m *Module) dailyTraffic(id, name string) (*int64, string) {
-	m.trafficMu.Lock()
-	defer m.trafficMu.Unlock()
 	location, err := time.LoadLocation(m.cfg.Current().Timezone)
 	if err != nil {
 		return nil, "统计时区不可用"
 	}
 	now := time.Now().In(location)
 	day := now.Format("2006-01-02")
-	cache := m.traffic[id]
-	if cache != nil && cache.day == day && time.Since(cache.checked) < time.Minute {
-		return cache.bytes, cache.reason
+
+	m.trafficMu.Lock()
+	existing := m.traffic[id]
+	if existing != nil && existing.day == day && time.Since(existing.checked) < time.Minute {
+		bytes, reason := existing.bytes, existing.reason
+		m.trafficMu.Unlock()
+		return bytes, reason
 	}
-	if cache == nil || cache.day != day {
-		cache = &siteTraffic{day: day, files: map[string]*trafficFile{}}
-		m.traffic[id] = cache
+	var prevFiles map[string]*trafficFile
+	if existing != nil && existing.day == day {
+		prevFiles = make(map[string]*trafficFile, len(existing.files))
+		for k, v := range existing.files {
+			prevFiles[k] = v
+		}
+	} else {
+		prevFiles = map[string]*trafficFile{}
 	}
-	cache.checked = now
-	cache.bytes = nil
-	cache.reason = ""
+	m.trafficMu.Unlock()
+
+	storeCache := func(bytes *int64, reason string, files map[string]*trafficFile) (*int64, string) {
+		m.trafficMu.Lock()
+		m.traffic[id] = &siteTraffic{
+			day:     day,
+			checked: now,
+			files:   files,
+			bytes:   bytes,
+			reason:  reason,
+		}
+		m.trafficMu.Unlock()
+		return bytes, reason
+	}
+
 	paths, err := filepath.Glob(siteLogPath(name, "access") + "*")
 	if err != nil {
 		return nil, "访问日志路径不可用"
 	}
 	// 自带logrotate使用copytruncate：轮转副本改变后须重建，不能把已重长的当前文件当成追加。
-	rotated := len(paths) != len(cache.files)
+	rotated := len(paths) != len(prevFiles)
 	if !rotated {
 		for _, path := range paths {
 			if path == siteLogPath(name, "access") {
 				continue
 			}
 			info, statErr := os.Lstat(path)
-			old := cache.files[path]
+			old := prevFiles[path]
 			if statErr != nil || old == nil || !os.SameFile(info, old.info) || info.Size() != old.info.Size() || info.ModTime() != old.info.ModTime() {
 				rotated = true
 				break
@@ -131,17 +150,16 @@ func (m *Module) dailyTraffic(id, name string) (*int64, string) {
 		}
 	}
 	if rotated {
-		cache.files = map[string]*trafficFile{}
+		prevFiles = map[string]*trafficFile{}
 	}
 	var total int64
 	active := map[string]*trafficFile{}
 	for _, path := range paths {
 		info, err := os.Lstat(path)
 		if err != nil || !info.Mode().IsRegular() {
-			cache.reason = "部分访问日志不可读"
-			return nil, cache.reason
+			return storeCache(nil, "部分访问日志不可读", prevFiles)
 		}
-		previous := cache.files[path]
+		previous := prevFiles[path]
 		compressed := strings.HasSuffix(path, ".gz")
 		unchanged := previous != nil && os.SameFile(info, previous.info) && info.Size() == previous.info.Size() && info.ModTime() == previous.info.ModTime()
 		if unchanged {
@@ -151,8 +169,7 @@ func (m *Module) dailyTraffic(id, name string) (*int64, string) {
 		}
 		file, err := os.Open(path)
 		if err != nil {
-			cache.reason = "访问日志读取失败"
-			return nil, cache.reason
+			return storeCache(nil, "访问日志读取失败", prevFiles)
 		}
 		result := &trafficFile{info: info}
 		var reader io.Reader = file
@@ -203,13 +220,10 @@ func (m *Module) dailyTraffic(id, name string) (*int64, string) {
 		}
 		file.Close()
 		if err != nil {
-			cache.reason = "访问日志无法解析，请检查日志格式或文件权限"
-			return nil, cache.reason
+			return storeCache(nil, "访问日志无法解析，请检查日志格式或文件权限", prevFiles)
 		}
 		active[path] = result
 		total += result.bytes
 	}
-	cache.files = active
-	cache.bytes = &total
-	return cache.bytes, ""
+	return storeCache(&total, "", active)
 }

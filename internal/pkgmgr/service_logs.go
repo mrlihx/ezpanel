@@ -11,33 +11,17 @@ const WebsiteLogRoot = "/www/wwwlogs"
 const ContainerLogDir = "/var/log/ezpanel"
 
 const (
-	containerMySQLErrorLog   = ContainerLogDir + "/error.log"
-	containerMySQLSlowLog    = ContainerLogDir + "/slow.log"
-	containerPostgresLog     = ContainerLogDir + "/postgresql.log"
-	containerMongoLog        = ContainerLogDir + "/mongodb.log"
-	containerRedisLog        = ContainerLogDir + "/redis.log"
-	containerMemcachedLog    = ContainerLogDir + "/memcached.log"
-	containerOpenRestyLog    = ContainerLogDir + "/error.log"
-	containerWAFLogDir       = ContainerLogDir + "/waf"
-	containerWAFEventLog     = containerWAFLogDir + "/events.jsonl"
-	containerPHPFPMErrorLog  = ContainerLogDir + "/fpm-error.log"
+	containerMySQLErrorLog  = ContainerLogDir + "/error.log"
+	containerMongoLog       = ContainerLogDir + "/mongodb.log"
+	containerRedisLog       = ContainerLogDir + "/redis.log"
+	containerMemcachedLog   = ContainerLogDir + "/memcached.log"
+	containerOpenRestyLog   = ContainerLogDir + "/error.log"
+	containerWAFLogDir      = ContainerLogDir + "/waf"
+	containerWAFEventLog    = containerWAFLogDir + "/events.jsonl"
+	containerPHPFPMErrorLog = ContainerLogDir + "/fpm-error.log"
 )
 
 func ContainerWAFEventLog() string { return containerWAFEventLog }
-
-func (m *Manager) serviceLogDir(id, instance string) string {
-	l := m.layout()
-	switch {
-	case id == "openresty":
-		return l.OpenRestyLogDir()
-	case IsPHP(id):
-		return l.PHPLogDir(phpBranch(id))
-	case IsDatabaseContainer(id):
-		return l.AppInstanceLogDir(id, instance)
-	default:
-		return l.AppLogDir(id)
-	}
-}
 
 func (m *Manager) mountedLogPath(hostLogDir, containerPath string) string {
 	if hostLogDir == "" || containerPath == "" || containerPath == "stderr" {
@@ -73,10 +57,6 @@ func (m *Manager) mountedDatabaseLogPath(id string, row DatabaseInstance, path s
 		return ""
 	}
 	return filepath.Join(row.DataDir, relative)
-}
-
-func (m *Manager) memcachedLogPath(instance string) string {
-	return filepath.Join(m.layout().AppInstanceLogDir("memcached", instance), "memcached.log")
 }
 
 func (m *Manager) prepareMemcachedLog(instance string) error {

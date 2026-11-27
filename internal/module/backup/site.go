@@ -11,6 +11,27 @@ import (
 	"ezpanel/internal/task"
 )
 
+func (m *Module) SetSiteBackupFinished(fn func(siteID, backupID, taskID string, err error)) {
+	m.siteBackupFinished = fn
+}
+
+func (m *Module) ReportSiteBackup(siteID, backupID, taskID string, err error) {
+	if m.siteBackupFinished != nil {
+		m.siteBackupFinished(siteID, backupID, taskID, err)
+	}
+}
+
+func (m *Module) SubmitSiteBackup(siteID, name, module, username, ip string) (string, error) {
+	return m.tasks.Submit(task.Meta{Module: module, Action: "backup", Target: name, ResourceID: siteID, Username: username, IP: ip, LockKey: "website:" + siteID}, func(ctx context.Context, log *task.Log) (any, error) {
+		row, err := m.CreateSite(ctx, siteID, "", log, ArchiveOptions{})
+		m.ReportSiteBackup(siteID, row.ID, log.TaskID(), err)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"backupId": row.ID}, nil
+	})
+}
+
 func (m *Module) CreateSite(ctx context.Context, id, cronID string, log *task.Log, options ArchiveOptions) (store.SiteBackup, error) {
 	var backup store.SiteBackup
 	var site store.Website

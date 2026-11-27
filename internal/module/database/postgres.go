@@ -573,7 +573,11 @@ func (m *Module) pgTableRows(c *gin.Context) {
 		return
 	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "50"))
+	rawSize := c.Query("page_size")
+	if rawSize == "" {
+		rawSize = c.DefaultQuery("pageSize", "50")
+	}
+	pageSize, _ := strconv.Atoi(rawSize)
 	if page < 1 {
 		page = 1
 	}

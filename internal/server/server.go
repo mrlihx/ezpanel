@@ -80,7 +80,7 @@ func New(options Options) (*Server, error) {
 	}
 	router.NoRoute(func(c *gin.Context) {
 		requestPath := c.Request.URL.Path
-		for _, prefix := range []string{"/api", "/ws", "/plugin"} {
+		for _, prefix := range []string{"/api", "/ws", "/plugin", "/plugin-frame"} {
 			if requestPath == prefix || strings.HasPrefix(requestPath, prefix+"/") {
 				c.Status(http.StatusNotFound)
 				return
@@ -91,8 +91,17 @@ func New(options Options) (*Server, error) {
 			return
 		}
 		name := strings.TrimPrefix(requestPath, "/")
-		if name != "" && fs.ValidPath(name) {
+		if name != "" && name != "plugin-frame.html" && fs.ValidPath(name) {
 			if file, err := fs.Stat(files, name); err == nil && !file.IsDir() {
+				if strings.HasPrefix(name, "assets/") || strings.HasPrefix(name, "shared/v1/") {
+					c.Writer.Header().Add("Vary", "Origin")
+					if auth.PluginFrameAssetRequest(c) {
+						c.Header("Access-Control-Allow-Origin", "null")
+					}
+				}
+				if name == "assets/plugin-frame.js" {
+					c.Header("Cache-Control", "no-cache")
+				}
 				c.FileFromFS(name, http.FS(files))
 				return
 			}

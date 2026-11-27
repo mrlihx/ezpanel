@@ -153,7 +153,10 @@ export function FTPUsers() {
   });
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <Button type="primary" onClick={() => setEditing({ enabled: true })}>
+      <Button
+        type="primary"
+        onClick={() => setEditing({ enabled: true, root: '/www/wwwroot' })}
+      >
         添加 FTP 用户
       </Button>
       {query.error && <Alert type="error" message={query.error.message} />}

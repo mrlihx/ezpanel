@@ -147,7 +147,7 @@ export default function SiteForm({
                         name: '默认代理',
                         path: '/',
                         target: proxyTarget ?? '',
-                        host: '',
+                        host: '$host',
                         enabled: true,
                       },
                     ]

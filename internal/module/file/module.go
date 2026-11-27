@@ -101,8 +101,16 @@ func errorResult(e error) (int, string) {
 		return 0, "ok"
 	case errors.Is(e, pathsafe.ErrProtected):
 		return response.Forbidden, "受保护路径，不能执行此操作"
-	case errors.Is(e, errArchivePassword):
-		return response.Invalid, errArchivePassword.Error()
+	case errors.Is(e, errArchivePassword),
+		errors.Is(e, errArchiveAlgorithm),
+		errors.Is(e, errArchiveFormat),
+		errors.Is(e, errArchiveChecksum),
+		errors.Is(e, errArchiveEncoding),
+		errors.Is(e, errArchivePath),
+		errors.Is(e, errArchiveEscape),
+		errors.Is(e, errArchiveSpecial),
+		errors.Is(e, errArchiveToolMissing):
+		return response.Invalid, e.Error()
 	case errors.Is(e, errConflict), os.IsExist(e):
 		return response.Conflict, "目标已存在或类型冲突"
 	case os.IsNotExist(e):
@@ -183,6 +191,9 @@ func (m *Module) list(c *gin.Context) {
 		}
 		info, e := v.Info()
 		if e != nil {
+			if os.IsNotExist(e) {
+				continue
+			}
 			fail(c, e)
 			return
 		}

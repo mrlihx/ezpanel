@@ -54,7 +54,7 @@ type Config struct {
 
 func (c Config) DataDir() string { return filepath.Join(c.InstallDir, "data") }
 func defaults(install string) Config {
-	return Config{TerminalFontSize: 14, Alias: "ezpanel", IdleMinutes: 30, SiteRoot: "/www/wwwroot", BackupRoot: "/www/backup", SoftwareSources: map[string]string{}, InstallDir: install, ListenAddr: "127.0.0.1", Timezone: "Asia/Shanghai", TrashMaxBytes: 10 << 30, ExtractMaxBytes: 10 << 30, ExtractMaxEntries: 100000, TaskLogMaxBytes: 10 << 20, TaskRetentionDays: 30, OpLogRetentionDays: 90}
+	return Config{TerminalFontSize: 14, Alias: "ezpanel", IdleMinutes: 60, SiteRoot: "/www/wwwroot", BackupRoot: "/www/backup", SoftwareSources: map[string]string{}, InstallDir: install, ListenAddr: "127.0.0.1", Timezone: "Asia/Shanghai", TrashMaxBytes: 10 << 30, ExtractMaxBytes: 10 << 30, ExtractMaxEntries: 100000, TaskLogMaxBytes: 10 << 20, TaskRetentionDays: 30, OpLogRetentionDays: 90}
 }
 func New(installDir string) (Config, error) {
 	c := defaults(installDir)
@@ -147,8 +147,14 @@ func Load(installDir string) (Config, error) {
 	if e = dec.Decode(&extra); e != io.EOF {
 		return c, errors.New("配置只允许一个文档")
 	}
+	// 旧版以分钟保存，向上取整兼容原先有效的超时设置。
+	if c.IdleMinutes >= 1 && c.IdleMinutes <= 720 {
+		c.IdleMinutes = ((c.IdleMinutes + 59) / 60) * 60
+	}
 	return c, Validate(c)
 }
+var entryPattern = regexp.MustCompile(`^[a-zA-Z0-9]{5,}$`)
+
 func Validate(c Config) error {
 	if e := validatePanel(c); e != nil {
 		return e
@@ -176,7 +182,7 @@ func Validate(c Config) error {
 			}
 		}
 	}
-	if !regexp.MustCompile(`^[a-zA-Z0-9]{5,}$`).MatchString(c.Entry) {
+	if !entryPattern.MatchString(c.Entry) {
 		return errors.New("安全入口须为至少5位字母或数字")
 	}
 	for i, s := range []string{c.JWTSecret, c.AESKey} {

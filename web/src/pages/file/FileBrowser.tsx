@@ -61,6 +61,8 @@ import ImportModal from './ImportModal';
 import { droppedEntries, type UploadEntry } from './uploadEntries';
 import BatchPermissionsModal from './BatchPermissionsModal';
 import FileTable, { isArchive, type FileAction } from './FileList';
+import { useNavigate } from 'react-router-dom';
+import { usePluginList } from '../../api/plugin';
 import FilePreview from './FilePreview';
 import FileBatchToolbar from './FileBatchToolbar';
 import './file.css';
@@ -97,6 +99,19 @@ export default function FileBrowser({
   onTerminal: (path: string) => void;
 }) {
   const { modal, message } = App.useApp();
+  const navigate = useNavigate();
+  const plugins = usePluginList();
+  const pluginActions = (plugins.data ?? []).flatMap((plugin) =>
+    plugin.runtimeStatus === 'running' && plugin.fileAction
+      ? [{ id: plugin.id, ...plugin.fileAction }]
+      : [],
+  );
+  function openFilePlugin(id: string, rows: FileEntry[]) {
+    if (rows.length)
+      void navigate(`/p/${encodeURIComponent(id)}`, {
+        state: { filePaths: rows.map((row) => row.path) },
+      });
+  }
   const { token } = theme.useToken();
   const [history, setHistory] = useState([initialPath]);
   const [cursor, setCursor] = useState(0);
@@ -128,7 +143,9 @@ export default function FileBrowser({
     overwrite: boolean;
     format: string;
     filename: string;
+    password: string;
   }>();
+  const compressFormat = Form.useWatch('format', form);
   const [working, setWorking] = useState(false);
   const [propertyTab, setPropertyTab] = useState<'general' | 'permissions'>(
     'general',
@@ -268,6 +285,7 @@ export default function FileBrowser({
       overwrite: false,
       format: 'tar.gz',
       filename,
+      password: '',
     });
     setOperation({ type, paths, fromClipboard });
   }
@@ -303,6 +321,8 @@ export default function FileBrowser({
                 paths,
                 dest: `${values.value.replace(/\/$/, '')}/${values.filename}`,
                 format: values.format,
+                password:
+                  values.format === 'tar.gz' ? '' : values.password || '',
               }
             : { paths, dest: values.value, overwrite: values.overwrite };
         const r = await fileTask(`/${type}`, data);
@@ -886,6 +906,12 @@ export default function FileBrowser({
               {(selection.length > 0 || mobileSelect || clipboard) && (
                 <FileBatchToolbar
                   count={selectedEntries.length}
+                  archiveAction={
+                    selectedEntries.length === 1 &&
+                    isArchive(selectedEntries[0])
+                      ? 'extract'
+                      : 'compress'
+                  }
                   mobileSelect={mobileSelect}
                   allSelected={allSelected}
                   canSelect={selectable.length > 0}
@@ -898,6 +924,10 @@ export default function FileBrowser({
                   }}
                   onClear={clearSelection}
                   onAction={(action) => handleAction(action, selectedEntries)}
+                  pluginActions={pluginActions.filter(
+                    (action) => selectedEntries.length === 1 || action.multiple,
+                  )}
+                  onPlugin={(id) => openFilePlugin(id, selectedEntries)}
                   onPaste={paste}
                   onClearClipboard={() => setClipboard(null)}
                 />
@@ -992,6 +1022,8 @@ export default function FileBrowser({
             setSelection([]);
           }}
           onAction={handleAction}
+          pluginActions={pluginActions}
+          onPlugin={openFilePlugin}
           onUpload={() => setImporting('upload')}
           onTerminal={() => onTerminal(path)}
           onPaste={paste}
@@ -1069,6 +1101,7 @@ export default function FileBrowser({
                         '.' +
                         format,
                     );
+                  if (format === 'tar.gz') form.setFieldValue('password', '');
                 }}
                 options={[
                   { label: 'tar.gz', value: 'tar.gz' },
@@ -1122,30 +1155,51 @@ export default function FileBrowser({
             />
           </Form.Item>
           {operation?.type === 'compress' && (
-            <Form.Item
-              name="filename"
-              label="保存文件名"
-              rules={[
-                { required: true, message: '请输入保存文件名' },
-                {
-                  validator: (_, value: string) =>
-                    value &&
-                    !['.', '..'].includes(value) &&
-                    !value.includes('/') &&
-                    !value.includes('\\') &&
-                    !value.includes(String.fromCharCode(0)) &&
-                    value
-                      .toLowerCase()
-                      .endsWith('.' + form.getFieldValue('format'))
-                      ? Promise.resolve()
-                      : Promise.reject(
-                          new Error('请输入与压缩类型匹配的单个文件名'),
-                        ),
-                },
-              ]}
-            >
-              <Input />
-            </Form.Item>
+            <>
+              <Form.Item
+                name="filename"
+                label="保存文件名"
+                rules={[
+                  { required: true, message: '请输入保存文件名' },
+                  {
+                    validator: (_, value: string) =>
+                      value &&
+                      !['.', '..'].includes(value) &&
+                      !value.includes('/') &&
+                      !value.includes('\\') &&
+                      !value.includes(String.fromCharCode(0)) &&
+                      value
+                        .toLowerCase()
+                        .endsWith('.' + form.getFieldValue('format'))
+                        ? Promise.resolve()
+                        : Promise.reject(
+                            new Error('请输入与压缩类型匹配的单个文件名'),
+                          ),
+                  },
+                ]}
+              >
+                <Input />
+              </Form.Item>
+              <Form.Item
+                name="password"
+                label="压缩密码"
+                extra={
+                  compressFormat === 'tar.gz'
+                    ? 'tar.gz 不支持压缩密码，如需加密请选择 zip 或 7z。'
+                    : '可选，留空则不加密。'
+                }
+              >
+                <Input.Password
+                  autoComplete="new-password"
+                  disabled={compressFormat === 'tar.gz'}
+                  placeholder={
+                    compressFormat === 'tar.gz'
+                      ? 'tar.gz 不支持压缩密码'
+                      : '无密码则留空'
+                  }
+                />
+              </Form.Item>
+            </>
           )}
           {operation &&
             !operation.fromClipboard &&

@@ -224,8 +224,12 @@ func (m *Manager) installDockerPHPLoader(ctx context.Context, id, containerName,
 	if err = os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
+	_ = os.Chmod(dir, 0755)
 	target := filepath.Join(dir, filename)
 	if err = os.WriteFile(target, loader, 0644); err != nil {
+		return err
+	}
+	if err = os.Chmod(target, 0644); err != nil {
 		return err
 	}
 	result, err := m.docker(ctx, 20*time.Second, "exec", containerName, "php", "-n", "-d", directive+"="+target, "-r", fmt.Sprintf(`exit(extension_loaded(%q)?0:1);`, moduleName))

@@ -36,6 +36,7 @@ type State struct {
 	ID                  string   `json:"id"`
 	Name                string   `json:"name"`
 	Installed           bool     `json:"installed"`
+	ComposeMissing      bool     `json:"composeMissing,omitempty"`
 	Running             *bool    `json:"running"`
 	Version             *string  `json:"version"`
 	InstalledVersions   []string `json:"installedVersions,omitempty"`
@@ -57,6 +58,7 @@ type application struct {
 }
 
 var applications = []application{
+	{id: "frp", name: "Frp服务", category: "tools", description: "提供内网穿透与反向代理，将内网的 TCP、UDP 和 Web 服务映射到外部网络"},
 	{id: "openresty", name: "OpenResty", category: "web", description: "网站统一入口，支持 PHP 和反向代理"},
 	{id: "python", name: "Python", category: "web", description: "在网站页部署 Python 项目"},
 	{id: "nodejs", name: "Node.js", category: "web", description: "在网站页部署 Node.js 项目"},
@@ -88,6 +90,14 @@ func app(id string) (application, bool) {
 }
 func ValidID(id string) bool { _, ok := app(id); return ok }
 func Name(id string) string  { a, _ := app(id); return a.name }
+
+func ApplicationNames() map[string]string {
+	names := make(map[string]string, len(applications))
+	for _, app := range applications {
+		names[app.id] = app.name
+	}
+	return names
+}
 func (a application) packagesFor(sys System) []string {
 	if sys.Manager == "apt-get" {
 		return a.apt
@@ -95,12 +105,7 @@ func (a application) packagesFor(sys System) []string {
 	return a.rpm
 }
 func contains(values []string, value string) bool {
-	for _, v := range values {
-		if v == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, value)
 }
 
 type Manager struct {
@@ -180,6 +185,9 @@ func (m *Manager) Detect() (System, error) {
 var versionPattern = regexp.MustCompile(`[0-9]+(?:\.[0-9]+)+(?:[-+][a-zA-Z0-9.]+)?`)
 
 func (m *Manager) Status(ctx context.Context, id string) (State, error) {
+	if id == "frp" {
+		return m.frpStatus(ctx)
+	}
 	if UsesDocker(id) {
 		return m.dockerStatus(ctx, id)
 	}
@@ -191,7 +199,7 @@ func (m *Manager) Status(ctx context.Context, id string) (State, error) {
 		return state, err
 	}
 	state := State{ID: id, Name: a.name, Category: a.category, Description: a.description}
-	if IsPHP(id) || id == "phpmyadmin" {
+	if id == "phpmyadmin" {
 		return state, nil
 	}
 	sys, e := m.Detect()
@@ -424,25 +432,16 @@ func (m *Manager) Catalog(ctx context.Context) []State {
 			if e == nil && detectErr == nil && !state.Installed && !UsesDocker(app.id) {
 				state.Installable = true
 			}
+			if e == nil && app.id == "docker" && state.Installed && state.Uninstallable {
+				if docker, err := m.LookPath("docker"); err == nil {
+					_, available := m.dockerComposeStatus(ctx, docker)
+					state.ComposeMissing = !available
+				}
+			}
 			rows[idx] = state
 		}(i, a)
 	}
 	wg.Wait()
-	for i := range rows {
-		if rows[i].ID != "mysql" && rows[i].ID != "mariadb" {
-			continue
-		}
-		other := "mysql"
-		if rows[i].ID == "mysql" {
-			other = "mariadb"
-		}
-		for _, row := range rows {
-			if row.ID == other && row.Installed {
-				rows[i].Installable = false
-				rows[i].Reason = "MySQL 与 MariaDB 互斥，请先处理现有 " + row.Name
-			}
-		}
-	}
 	return rows
 }
 
@@ -560,6 +559,9 @@ func (m *Manager) checkPlan(ctx context.Context, sys System, action string, pack
 }
 
 func (m *Manager) Install(ctx context.Context, id string, onLine func(string)) (State, error) {
+	if id == "frp" {
+		return m.installFRP(ctx, "", []string{"frps"}, false, onLine)
+	}
 	if UsesDocker(id) {
 		return m.installDocker(ctx, id, "", onLine)
 	}
@@ -580,6 +582,9 @@ func (m *Manager) installPackage(ctx context.Context, id, version string, onLine
 	defer m.unlock(id)
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
+	if onLine == nil {
+		onLine = func(string) {}
+	}
 	state, e := m.Status(ctx, id)
 	if e != nil {
 		return state, e
@@ -600,6 +605,13 @@ func (m *Manager) installPackage(ctx context.Context, id, version string, onLine
 		if !state.Uninstallable {
 			return state, ErrUnsupported
 		}
+		if id == "docker" {
+			docker, err := m.LookPath("docker")
+			if err != nil {
+				return state, err
+			}
+			return state, m.ensureDockerCompose(ctx, docker, onLine)
+		}
 		if id == "clamav" && state.Manageable && (state.Running == nil || !*state.Running) {
 			if e = m.prepareClamAV(ctx, state, onLine); e != nil {
 				return state, e
@@ -616,12 +628,8 @@ func (m *Manager) installPackage(ctx context.Context, id, version string, onLine
 		}
 		return state, nil
 	}
-	if id == "mysql" || id == "mariadb" {
-		other := "mysql"
-		if id == "mysql" {
-			other = "mariadb"
-		}
-		conflict, err := m.Status(ctx, other)
+	if id == "mariadb" {
+		conflict, err := m.Status(ctx, "mysql")
 		if err != nil {
 			return state, err
 		}
@@ -694,6 +702,15 @@ func (m *Manager) installPackage(ctx context.Context, id, version string, onLine
 	if !state.Installed || !state.Uninstallable {
 		return state, errors.New("安装后未检测到受控软件包，请检查任务日志")
 	}
+	if id == "docker" {
+		docker, err := m.LookPath("docker")
+		if err == nil {
+			err = m.ensureDockerCompose(ctx, docker, onLine)
+		}
+		if err != nil {
+			return state, fmt.Errorf("Docker 引擎已安装，补装 Compose 失败：%w", err)
+		}
+	}
 	if len(a.units) > 0 {
 		if !state.Manageable {
 			return state, errors.New("安装后未检测到受控服务")
@@ -717,6 +734,18 @@ func (m *Manager) installPackage(ctx context.Context, id, version string, onLine
 				if _, err = m.Run(ctx, timeout, nil, "/usr/bin/systemctl", "restart", state.Unit); err != nil {
 					return state, err
 				}
+			}
+		}
+		if id == "supervisor" {
+			path := hostToolConfigs[id][""][0]
+			if state.PkgManager != "apt-get" {
+				path = hostToolConfigs[id][""][1]
+			}
+			if _, e = m.supervisorCall(ctx, path, "initialize", nil); e != nil {
+				return state, e
+			}
+			if _, e = m.Run(ctx, timeout, nil, "/usr/bin/systemctl", "restart", state.Unit); e != nil {
+				return state, e
 			}
 		}
 		if id == "rsync" {
@@ -744,6 +773,9 @@ func (m *Manager) installPackage(ctx context.Context, id, version string, onLine
 }
 
 func (m *Manager) Uninstall(ctx context.Context, id string, onLine func(string)) (State, error) {
+	if id == "frp" {
+		return m.removeFRP(ctx)
+	}
 	if UsesDocker(id) {
 		return m.uninstallDocker(ctx, id)
 	}
@@ -757,6 +789,9 @@ func (m *Manager) Uninstall(ctx context.Context, id string, onLine func(string))
 	defer m.unlock(id)
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
+	if onLine == nil {
+		onLine = func(string) {}
+	}
 	state, e := m.Status(ctx, id)
 	if e != nil {
 		return state, e
@@ -890,16 +925,6 @@ func (m *Manager) Service(ctx context.Context, id, action string) (State, error)
 			return state, fmt.Errorf("Nginx配置检查失败：%s", strings.TrimSpace(result.Stderr+result.Stdout))
 		}
 	}
-	if action == "reload" && IsPHP(id) {
-		record, err := m.sourceRecord(id)
-		if err != nil {
-			return state, err
-		}
-		result, err := m.Run(ctx, 30*time.Second, nil, record.Prefix+"/sbin/php-fpm", "-c", m.phpDirectory(id)+"/php.ini", "-t", "-y", m.configPath(id))
-		if err != nil {
-			return state, fmt.Errorf("PHP-FPM配置检查失败：%s", strings.TrimSpace(result.Stderr+result.Stdout))
-		}
-	}
 	if action == "reload" && id == "fail2ban" {
 		if _, e = m.fail2banClient(ctx, "-t"); e != nil {
 			return state, e
@@ -929,7 +954,16 @@ func (m *Manager) Service(ctx context.Context, id, action string) (State, error)
 		}
 		timeout = 5 * time.Minute
 	}
-	result, e := m.Run(ctx, timeout, nil, "/usr/bin/systemctl", action, state.Unit)
+	args := []string{action, state.Unit}
+	if action == "stop" {
+		// 同时关闭关联的激活单元，避免 socket 等在服务停止后再次拉起它。
+		triggers, err := m.Run(ctx, timeout, nil, systemctlPath, "show", state.Unit, "--property=TriggeredBy", "--value")
+		if err != nil {
+			return state, fmt.Errorf("读取服务激活单元失败：%w", err)
+		}
+		args = append([]string{"disable", "--now", state.Unit}, strings.Fields(triggers.Stdout)...)
+	}
+	result, e := m.Run(ctx, timeout, nil, systemctlPath, args...)
 	if e != nil {
 		return state, fmt.Errorf("服务操作失败：%s", strings.TrimSpace(result.Stderr+" "+result.Stdout))
 	}
@@ -940,6 +974,11 @@ func (m *Manager) Service(ctx context.Context, id, action string) (State, error)
 	expected := action != "stop"
 	if actual.Running == nil || *actual.Running != expected {
 		return actual, errors.New("服务命令已执行，但状态尚未达到预期，请刷新或检查日志")
+	}
+	if action == "start" {
+		if err := m.enableSystemdStartup(ctx, timeout, state.Unit); err != nil {
+			return actual, err
+		}
 	}
 	if action != "stop" {
 		if record, err := m.sourceRecord(id); err == nil && record.UpdateFailed {

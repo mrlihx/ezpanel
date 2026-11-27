@@ -13,6 +13,7 @@ import {
 } from '../../api/toolbox';
 import { LAYOUT, SPACING } from '../../styles/tokens';
 import TaskDrawer from '../../components/TaskDrawer';
+import './tools.css';
 const TerminalModal = lazy(() => import('../file/TerminalModal'));
 const sections = [
   ['ip', 'IP 设置'],
@@ -23,7 +24,6 @@ const sections = [
   ['hosts', 'hosts'],
   ['mirrors', '镜像源'],
   ['commands', '常用命令'],
-  ['kernel', '内核参数设置'],
   ['audit', '命令审计'],
 ] as const;
 const ToolIpPanel = lazy(() => import('./ToolIpPanel'));
@@ -34,7 +34,6 @@ const ToolDisksPanel = lazy(() => import('./ToolDisksPanel'));
 const ToolHostsPanel = lazy(() => import('./ToolHostsPanel'));
 const ToolMirrorsPanel = lazy(() => import('./ToolMirrorsPanel'));
 const ToolCommandsPanel = lazy(() => import('./ToolCommandsPanel'));
-const ToolKernelPanel = lazy(() => import('./ToolKernelPanel'));
 const ToolAuditPanel = lazy(() => import('./ToolAuditPanel'));
 function useToolboxPage() {
   const { message, modal } = App.useApp();
@@ -123,11 +122,6 @@ function useToolboxPage() {
     queryFn: () => toolboxData('commands'),
     enabled: section === 'commands',
   });
-  const kernel = useQuery({
-    queryKey: ['toolbox', 'kernel'],
-    queryFn: () => toolboxData('kernel'),
-    enabled: section === 'kernel',
-  });
   const audit = useQuery({
     queryKey: ['toolbox', 'audit', auditPage],
     queryFn: () => toolboxData('audit', auditPage),
@@ -146,7 +140,6 @@ function useToolboxPage() {
     hosts,
     mirrors,
     commands,
-    kernel,
     audit,
   };
   const formProps = {
@@ -189,7 +182,6 @@ function useToolboxPage() {
     hosts,
     hostsDraft,
     ip,
-    kernel,
     route,
     message,
     mirrorAddresses,
@@ -239,7 +231,6 @@ export default function ToolsPage() {
     hosts,
     hostsDraft,
     ip,
-    kernel,
     route,
     message,
     mirrorAddresses,
@@ -357,15 +348,6 @@ export default function ToolsPage() {
         setTerminal={setTerminal}
       />
     ),
-    kernel: (
-      <ToolKernelPanel
-        busy={busy}
-        confirm={confirm}
-        kernel={kernel}
-        message={message}
-        save={save}
-      />
-    ),
     audit: (
       <ToolAuditPanel
         audit={audit}
@@ -379,18 +361,18 @@ export default function ToolsPage() {
     ),
   };
   return (
-    <>
+    <div
+      className={
+        section === 'audit' ? 'tools-page tools-page-audit' : 'tools-page'
+      }
+    >
       <SectionTabs
         activeKey={section}
         onChange={route.selectTab}
         items={sections.map(([key, label]) => {
           const current = queries[key];
-          const content = (
-            <Space
-              direction="vertical"
-              size={SPACING.lg}
-              style={{ width: '100%' }}
-            >
+          const inner = (
+            <>
               {current.error && (
                 <Alert
                   type="error"
@@ -407,8 +389,20 @@ export default function ToolsPage() {
                   {panels[key]}
                 </Suspense>
               )}
-            </Space>
+            </>
           );
+          const content =
+            key === 'audit' ? (
+              <div className="tools-audit-body">{inner}</div>
+            ) : (
+              <Space
+                direction="vertical"
+                size={SPACING.lg}
+                style={{ width: '100%' }}
+              >
+                {inner}
+              </Space>
+            );
           return {
             key,
             label,
@@ -432,6 +426,6 @@ export default function ToolsPage() {
           />
         </Suspense>
       )}
-    </>
+    </div>
   );
 }

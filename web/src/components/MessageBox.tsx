@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   useQuery,
   useQueryClient,
@@ -18,6 +18,11 @@ const actions: Record<string, string> = {
   update: '更新',
   uninstall: '卸载',
   switch: '切换版本',
+  reinstall: '重新安装',
+  start: '启动',
+  stop: '停止',
+  restart: '重启',
+  reload: '重载配置',
   'rsync-send': 'Rsync 发送',
 };
 const applications: Record<string, string> = {
@@ -26,6 +31,7 @@ const applications: Record<string, string> = {
   mariadb: 'MariaDB',
   redis: 'Redis',
   docker: 'Docker',
+  frp: 'Frp服务',
   'mysql-client': 'MySQL客户端',
 };
 const statuses = {
@@ -44,7 +50,7 @@ export default function MessageBox({
   const { md } = Grid.useBreakpoint();
   const [page, setPage] = useState(1);
   const [logTaskId, setLogTaskId] = useState<string>();
-  const [notified] = useState(() => new Set<string>());
+  const refreshedTasks = useRef(new Set<string>());
   const previousRunning = useRef(new Set<string>());
   const messages = useQuery({
     queryKey: ['software-tasks', 'finished', page],
@@ -62,37 +68,14 @@ export default function MessageBox({
       ),
     enabled: box.open && box.tab === 'logs',
   });
-  const refreshApplications = () => {
-    for (const key of [
-      'app-sources',
-      'software-catalog',
-      'sysinfo-summary',
-      'website-env',
-      'website-php-versions',
-      'runtime-environments',
-      'database-instances',
-      'db-env',
-      'db-servers',
-      'nosql-env',
-      'nosql-connections',
-      'php-extensions',
-      'php-config',
-      'clamav-visual',
-      'clamav-history',
-      'clamav-quarantine',
-    ])
-      void client.invalidateQueries({ queryKey: [key] });
-    void client.invalidateQueries({ queryKey: ['software-tasks'] });
-  };
-  useEffect(() => {
-    if (!running.data) return;
-    const current = new Set(running.data.list.map((task) => task.taskId));
-    const finished = [...previousRunning.current].some(
-      (id) => !current.has(id),
-    );
-    previousRunning.current = current;
-    if (finished) {
+  const refreshApplications = useCallback(
+    (taskIds: string[]) => {
+      const refreshed = refreshedTasks.current;
+      const pending = taskIds.filter((id) => !refreshed.has(id));
+      if (!pending.length) return;
+      for (const id of pending) refreshed.add(id);
       for (const key of [
+        'frp-services',
         'app-sources',
         'software-catalog',
         'sysinfo-summary',
@@ -112,8 +95,18 @@ export default function MessageBox({
         'software-tasks',
       ])
         void client.invalidateQueries({ queryKey: [key] });
-    }
-  }, [running.data, client]);
+    },
+    [client],
+  );
+  useEffect(() => {
+    if (!running.data) return;
+    const current = new Set(running.data.list.map((task) => task.taskId));
+    const finished = [...previousRunning.current].filter(
+      (id) => !current.has(id),
+    );
+    previousRunning.current = current;
+    refreshApplications(finished);
+  }, [running.data, refreshApplications]);
   const columns = (showLog: (taskId: string) => void) => [
     {
       title: '应用',
@@ -294,8 +287,7 @@ export default function MessageBox({
                     <TaskContent
                       key={`${taskId}-${logRefresh}`}
                       taskId={taskId}
-                      notified={notified}
-                      onSettled={refreshApplications}
+                      onSettled={(task) => refreshApplications([task.taskId])}
                       logsOnly
                       fit
                     />

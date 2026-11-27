@@ -50,7 +50,7 @@ export async function request<T>(
       useAuth.getState().setUser(null);
       if (location.pathname !== '/login')
         location.assign(
-          `/login?redirect=${encodeURIComponent(location.pathname + location.search)}`,
+          `/login?redirect=${encodeURIComponent(location.pathname + location.search + location.hash)}`,
         );
     }
     if (!options.silentError && failure.code !== 1002)

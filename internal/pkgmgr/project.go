@@ -13,13 +13,35 @@ import (
 )
 
 const projectStartupTimeout = 2 * time.Minute
+const projectIDLabel = "ezpanel.project-id"
+
+func (m *Manager) projectContainerName(ctx context.Context, id string) (string, error) {
+	siteID, stage, _ := strings.Cut(id, "-")
+	result, err := m.docker(ctx, 5*time.Second, "ps", "-a",
+		"--filter", "label=ezpanel.project=true", "--filter", "label="+projectIDLabel+"="+siteID, "--format", "{{.Names}}")
+	if err != nil {
+		return "", err
+	}
+	for _, name := range strings.Fields(result.Stdout) {
+		_, suffix, _ := strings.Cut(name, "-")
+		_, currentStage, _ := strings.Cut(suffix, "-")
+		if currentStage == stage {
+			return name, nil
+		}
+	}
+	// 旧版容器没有项目 ID 标签，仍按原名称管理。
+	return "ezpanel-site-" + id, nil
+}
 
 func (m *Manager) StartProject(ctx context.Context, id, kind string, runtime RuntimeEnvironment, root, command, environment, registry string, port int) (string, error) {
 	if err := m.ensureManagedNetwork(ctx); err != nil {
 		return "", err
 	}
-	name := "ezpanel-site-" + id
-	args := []string{"create", "--pull=never", "--name", name, "--label", "ezpanel.managed=true", "--label", "ezpanel.project=true", "--restart=no",
+	name, err := m.freeContainerName(ctx, kind+"-")
+	if err != nil {
+		return "", err
+	}
+	args := []string{"create", "--pull=never", "--name", name, "--label", "ezpanel.managed=true", "--label", "ezpanel.project=true", "--label", projectIDLabel + "=" + id, "--restart=no",
 		"--network", ManagedNetwork,
 		"--security-opt", "no-new-privileges=true", "--cap-drop", "ALL", "--log-opt", "max-size=10m", "--log-opt", "max-file=3",
 		"--workdir", "/app", "--mount", "type=bind,src=" + root + ",dst=/app"}
@@ -49,7 +71,7 @@ func (m *Manager) StartProject(ctx context.Context, id, kind string, runtime Run
 	if _, err := m.docker(ctx, time.Minute, append(args, runtime.Image, "sh", "-c", command)...); err != nil {
 		return "", err
 	}
-	_, err := m.ProjectAction(ctx, id, "start")
+	_, err = m.docker(ctx, 30*time.Second, "start", name)
 	var target string
 	if err == nil {
 		target, err = m.waitProject(ctx, name, port)
@@ -70,7 +92,10 @@ func (m *Manager) StartProject(ctx context.Context, id, kind string, runtime Run
 }
 
 func (m *Manager) ResumeProject(ctx context.Context, id, action string, port int) (string, error) {
-	name := "ezpanel-site-" + id
+	name, err := m.projectContainerName(ctx, id)
+	if err != nil {
+		return "", err
+	}
 	info, exists, err := m.inspectContainer(ctx, name)
 	if err != nil {
 		return "", err
@@ -85,7 +110,7 @@ func (m *Manager) ResumeProject(ctx context.Context, id, action string, port int
 		return "", err
 	}
 	_, _ = m.ProjectAction(ctx, id+"-failed", "remove")
-	if _, err := m.ProjectAction(ctx, id, action); err != nil {
+	if _, err := m.docker(ctx, 30*time.Second, action, name); err != nil {
 		return "", err
 	}
 	target, err := m.waitProject(ctx, name, port)
@@ -187,7 +212,10 @@ func listeningProjectPorts(table string) []string {
 }
 
 func (m *Manager) ProjectAction(ctx context.Context, id, action string) (string, error) {
-	name := "ezpanel-site-" + id
+	name, err := m.projectContainerName(ctx, id)
+	if err != nil {
+		return "", err
+	}
 	switch action {
 	case "logs":
 		result, err := m.docker(ctx, 10*time.Second, "logs", "--timestamps", "--tail", "300", name)
@@ -220,43 +248,92 @@ func (m *Manager) ProjectAction(ctx context.Context, id, action string) (string,
 		if _, exists, err := m.inspectContainer(ctx, name); err != nil || !exists {
 			return "", err
 		}
-		_, err := m.docker(ctx, 30*time.Second, "rm", "-f", name)
+		_, err = m.docker(ctx, 30*time.Second, "rm", "-f", name)
 		return "", err
 	default:
-		_, err := m.docker(ctx, 30*time.Second, action, name)
+		_, err = m.docker(ctx, 30*time.Second, action, name)
 		return "", err
 	}
 }
 
 func (m *Manager) ProjectLogs(ctx context.Context, id string) (string, bool, bool, error) {
 	failedID := id + "-failed"
-	_, failed, err := m.inspectContainer(ctx, "ezpanel-site-"+failedID)
+	failedName, err := m.projectContainerName(ctx, failedID)
 	if err != nil {
 		return "", false, false, err
 	}
-	info, exists, err := m.inspectContainer(ctx, "ezpanel-site-"+id)
+	_, failed, err := m.inspectContainer(ctx, failedName)
+	if err != nil {
+		return "", false, false, err
+	}
+	name, err := m.projectContainerName(ctx, id)
+	if err != nil {
+		return "", false, failed, err
+	}
+	info, exists, err := m.inspectContainer(ctx, name)
 	if err != nil {
 		return "", false, failed, err
 	}
 	running := exists && info.State.Running && info.State.Status == "running"
-	logID := id
+	targetName := name
 	if failed {
-		logID = failedID
+		targetName = failedName
 	} else if !exists {
 		return "", false, false, nil
 	}
-	log, err := m.ProjectAction(ctx, logID, "logs")
+	log, err := m.dockerLogs(ctx, targetName)
 	return log, running, failed, err
 }
 
+func (m *Manager) dockerLogs(ctx context.Context, name string) (string, error) {
+	result, err := m.docker(ctx, 10*time.Second, "logs", "--timestamps", "--tail", "300", name)
+	if err != nil {
+		return "", err
+	}
+	// Docker 时间戳使用补齐的 RFC3339Nano UTC 格式，可直接按字符串合并两路日志。
+	type logLine struct{ timestamp, content string }
+	var lines []logLine
+	for _, stream := range []string{result.Stdout, result.Stderr} {
+		if stream == "" {
+			continue
+		}
+		for _, line := range strings.Split(strings.TrimSuffix(stream, "\n"), "\n") {
+			if line == "" {
+				continue
+			}
+			timestamp, _, _ := strings.Cut(line, " ")
+			lines = append(lines, logLine{timestamp: timestamp, content: line})
+		}
+	}
+	slices.SortStableFunc(lines, func(a, b logLine) int {
+		return strings.Compare(a.timestamp, b.timestamp)
+	})
+	var out strings.Builder
+	for _, line := range lines {
+		out.WriteString(line.content)
+		out.WriteByte('\n')
+	}
+	return out.String(), nil
+}
+
 func (m *Manager) RenameProject(ctx context.Context, from, to string) error {
-	_, err := m.docker(ctx, 15*time.Second, "rename", "ezpanel-site-"+from, "ezpanel-site-"+to)
+	name, err := m.projectContainerName(ctx, from)
+	if err != nil {
+		return err
+	}
+	_, fromStage, _ := strings.Cut(from, "-")
+	_, toStage, _ := strings.Cut(to, "-")
+	target := strings.TrimSuffix(name, "-"+fromStage)
+	if toStage != "" {
+		target += "-" + toStage
+	}
+	_, err = m.docker(ctx, 15*time.Second, "rename", name, target)
 	return err
 }
 
 func (m *Manager) ProjectRunning(ctx context.Context, id string) bool {
-	info, exists, err := m.inspectContainer(ctx, "ezpanel-site-"+id)
-	return err == nil && exists && info.State.Running && info.State.Status == "running"
+	service, err := m.ProjectService(ctx, id)
+	return err == nil && service.Running
 }
 
 type ProjectService struct {
@@ -271,7 +348,10 @@ type ProjectService struct {
 }
 
 func (m *Manager) ProjectService(ctx context.Context, id string) (ProjectService, error) {
-	name := "ezpanel-site-" + id
+	name, err := m.projectContainerName(ctx, id)
+	if err != nil {
+		return ProjectService{}, err
+	}
 	info, exists, err := m.inspectContainer(ctx, name)
 	if err != nil || !exists {
 		return ProjectService{}, err
@@ -287,10 +367,18 @@ func (m *Manager) ProjectService(ctx context.Context, id string) (ProjectService
 
 func (m *Manager) RunningProjects(ctx context.Context) map[string]bool {
 	rows := map[string]bool{}
-	result, err := m.docker(ctx, 5*time.Second, "ps", "--filter", "label=ezpanel.project=true", "--filter", "status=running", "--format", "{{.Names}}")
+	result, err := m.docker(ctx, 5*time.Second, "ps", "--filter", "label=ezpanel.project=true", "--filter", "status=running",
+		"--format", `{{.Names}}	{{.Label "ezpanel.project-id"}}`)
 	if err == nil {
-		for _, name := range strings.Fields(result.Stdout) {
-			if id, ok := strings.CutPrefix(name, "ezpanel-site-"); ok {
+		for line := range strings.SplitSeq(strings.TrimSpace(result.Stdout), "\n") {
+			name, id, _ := strings.Cut(line, "\t")
+			if strings.HasSuffix(name, "-previous") || strings.HasSuffix(name, "-failed") {
+				continue
+			}
+			if id == "" {
+				id, _ = strings.CutPrefix(name, "ezpanel-site-")
+			}
+			if id != "" {
 				rows[id] = true
 			}
 		}

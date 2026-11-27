@@ -39,9 +39,15 @@ export default defineConfig({
       },
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
+          if (req.url === '/assets/plugin-frame.js') {
+            req.url = '/src/plugins/frame.tsx';
+            return next();
+          }
           const match = /^\/shared\/v1\/(\d+)\.js$/.exec(req.url ?? '');
           const name = match && shared[Number(match[1])];
           if (!name) return next();
+          if (req.headers.origin === 'null')
+            res.setHeader('Access-Control-Allow-Origin', 'null');
           res.setHeader('Content-Type', 'text/javascript');
           res.end(bridge(name));
         });
@@ -61,19 +67,19 @@ export default defineConfig({
   // 纯客户端构建，依赖的 use client 标记不涉及服务端组件边界。
   build: {
     rolldownOptions: {
+      input: { main: 'index.html', 'plugin-frame': 'plugin-frame.html' },
       checks: { moduleLevelDirective: false },
       output: {
+        entryFileNames: (chunk) =>
+          chunk.name === 'plugin-frame'
+            ? 'assets/plugin-frame.js'
+            : 'assets/[name]-[hash].js',
         codeSplitting: {
           groups: [
             {
               name: 'vendor-react',
               test: /node_modules\/(react|react-dom|react-router|scheduler)\//,
               priority: 20,
-            },
-            {
-              name: 'vendor-antd',
-              test: /node_modules\/(antd|@ant-design|rc-|@rc-component)\//,
-              priority: 15,
             },
           ],
         },
@@ -82,12 +88,17 @@ export default defineConfig({
   },
   server: {
     host: '127.0.0.1',
+    cors: { origin: ['null', /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/] },
     port: 5173,
     strictPort: true,
     proxy: {
       '/plugin': {
         target,
         ws: true,
+        changeOrigin: true,
+      },
+      '/plugin-frame': {
+        target,
         changeOrigin: true,
       },
       '/api': {

@@ -2,6 +2,27 @@
   --content-sized-limit: 176px;
 }
 
+.proxy-rule-form .ant-form-item-row {
+  flex-wrap: nowrap;
+}
+
+.proxy-header-fields {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 2fr) minmax(0, 3fr) auto;
+  align-items: start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.proxy-header-fields > .ant-select {
+  width: 100%;
+}
+
+.proxy-header-fields > .ant-form-item {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
 .website-status-button.ant-btn {
   padding-inline: 0;
 }

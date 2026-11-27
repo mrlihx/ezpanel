@@ -69,6 +69,7 @@ import ResourcePopover, { type ResourceKind } from './ResourceDetails';
 import SystemBar from './SystemBar';
 import { bytes, number } from './format';
 import './dashboard.css';
+import PluginWidgets from './PluginWidgets';
 
 echarts.use([
   LineChart,
@@ -489,6 +490,7 @@ export default function Dashboard() {
           );
         })}
       </Row>
+      <PluginWidgets />
       <Card title="概览" size="small">
         {counts.isError && (
           <Alert

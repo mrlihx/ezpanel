@@ -118,6 +118,10 @@ func (m *Manager) saveSettings(ctx context.Context, id, content, revision string
 		return e
 	}
 	defer m.unlock(id)
+	return m.saveSettingsUnlocked(ctx, id, content, revision, reloadPHP, kind...)
+}
+
+func (m *Manager) saveSettingsUnlocked(ctx context.Context, id, content, revision string, reloadPHP bool, kind ...string) error {
 	current, e := m.Settings(ctx, id, kind...)
 	if e != nil {
 		return e
@@ -182,6 +186,11 @@ func (m *Manager) saveSettings(ctx context.Context, id, content, revision string
 	}
 	if id == "openresty" {
 		if _, err := m.OpenRestyCommand(ctx, "-t"); err != nil {
+			return errors.Join(err, os.WriteFile(path, []byte(current.Content), mode))
+		}
+	}
+	if id == "supervisor" {
+		if _, err := m.supervisorCall(ctx, path, "validate", nil); err != nil {
 			return errors.Join(err, os.WriteFile(path, []byte(current.Content), mode))
 		}
 	}

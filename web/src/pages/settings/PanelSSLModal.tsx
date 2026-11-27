@@ -106,6 +106,26 @@ export default function PanelSSLModal({
                   <Row gutter={SPACING.lg}>
                     <Col xs={24} md={12}>
                       <Form.Item
+                        label="证书（PEM）"
+                        name="certificate"
+                        rules={[
+                          {
+                            required: tab === 'current',
+                            message: '请填写完整证书链',
+                          },
+                        ]}
+                        extra="完整证书链须覆盖面板访问域名或IP。"
+                      >
+                        <Input.TextArea
+                          rows={12}
+                          style={{ fontFamily: MONO_FONT }}
+                          placeholder="-----BEGIN CERTIFICATE-----"
+                          spellCheck={false}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} md={12}>
+                      <Form.Item
                         label="私钥（KEY）"
                         name="privateKey"
                         rules={[
@@ -126,26 +146,6 @@ export default function PanelSSLModal({
                         />
                       </Form.Item>
                     </Col>
-                    <Col xs={24} md={12}>
-                      <Form.Item
-                        label="证书（PEM）"
-                        name="certificate"
-                        rules={[
-                          {
-                            required: tab === 'current',
-                            message: '请填写完整证书链',
-                          },
-                        ]}
-                        extra="完整证书链须覆盖面板访问域名或IP。"
-                      >
-                        <Input.TextArea
-                          rows={12}
-                          style={{ fontFamily: MONO_FONT }}
-                          placeholder="-----BEGIN CERTIFICATE-----"
-                          spellCheck={false}
-                        />
-                      </Form.Item>
-                    </Col>
                   </Row>
                 </>
               ),
@@ -157,6 +157,7 @@ export default function PanelSSLModal({
                 <CertificateWorkspace
                   mode="free"
                   defaultDomains={[domain]}
+                  autoTempSite
                   onDeploy={deploy}
                 />
               ),

@@ -24,7 +24,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// RemoteStorage由后续备份插件适配；storageID定位配置，key为供应商对象标识。
+// RemoteStorage 由内置渠道或备份插件适配。storageID 定位配置，key 为归档对象名。
 // 上传接入计划任务，手动备份接口始终创建本地文件。
 type RemoteStorage interface {
 	// Upload 接收相对于渠道根目录的归档路径。
@@ -43,12 +43,13 @@ type StorageTargetProvider interface {
 	StorageTargets() []StorageTarget
 }
 type Module struct {
-	db       *gorm.DB
-	cfg      config.Config
-	tasks    *task.Manager
-	auth     *auth.Service
-	remote   RemoteStorage
-	channels *channelStorage
+	db                 *gorm.DB
+	cfg                config.Config
+	tasks              *task.Manager
+	auth               *auth.Service
+	remote             RemoteStorage
+	channels           *channelStorage
+	siteBackupFinished func(siteID, backupID, taskID string, err error)
 }
 
 func New(db *gorm.DB, cfg config.Config, tasks *task.Manager, a *auth.Service, remote RemoteStorage) *Module {
@@ -63,6 +64,7 @@ func (m *Module) Routes(g *gin.RouterGroup) {
 	r := g.Group("/api/backups")
 	r.GET("/storages", func(c *gin.Context) { response.OK(c, m.StorageTargets()) })
 	r.GET("/channels", m.listChannels)
+	r.GET("/channels/providers", m.listProviders)
 	r.POST("/channels", m.saveChannel)
 	r.POST("/channels/test", m.testChannel)
 	r.PUT("/channels/:id", m.saveChannel)
@@ -244,7 +246,7 @@ func (m *Module) list(c *gin.Context) {
 		}
 	}
 	var total int64
-	var rows []record
+	rows := make([]record, 0)
 	if err := q.Count(&total).Error; err != nil {
 		fail(c, err)
 		return
@@ -281,8 +283,23 @@ func (m *Module) download(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var reader io.ReadCloser
-	size := row.Size
+	reader, size, err := m.openBackup(c.Request.Context(), row)
+	if err != nil {
+		if errors.Is(err, errRemoteUnavailable) {
+			response.Fail(c, response.Forbidden, err.Error())
+		} else {
+			fail(c, err)
+		}
+		return
+	}
+	defer reader.Close()
+	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": row.FileName}))
+	c.DataFromReader(http.StatusOK, size, "application/octet-stream", reader, nil)
+}
+
+var errRemoteUnavailable = errors.New("远程备份存储插件不可用，备份记录已保留")
+
+func (m *Module) openBackup(ctx context.Context, row record) (io.ReadCloser, int64, error) {
 	var err error
 	if row.FilePath != "" || row.StorageType != "remote" {
 		var f *os.File
@@ -296,25 +313,26 @@ func (m *Module) download(c *gin.Context) {
 			if err != nil {
 				f.Close()
 			} else {
-				reader = f
-				size = info.Size()
+				return f, info.Size(), nil
 			}
 		}
 	}
-	if reader == nil && row.StorageType == "remote" {
+	if row.StorageType == "remote" {
 		if m.remote == nil {
-			response.Fail(c, response.Forbidden, "远程备份存储插件不可用，备份记录已保留")
-			return
+			return nil, 0, errRemoteUnavailable
 		}
-		reader, err = m.remote.Open(c.Request.Context(), row.StorageID, row.RemoteKey)
+		reader, err := m.remote.Open(ctx, row.StorageID, row.RemoteKey)
+		return reader, row.Size, err
 	}
-	if err != nil {
-		fail(c, err)
-		return
+	return nil, 0, err
+}
+
+func (m *Module) OpenSiteArchive(ctx context.Context, siteID, backupID string) (io.ReadCloser, int64, error) {
+	var row record
+	if err := m.db.WithContext(ctx).Table("site_backups").Where("id = ? AND website_id = ?", backupID, siteID).Take(&row).Error; err != nil {
+		return nil, 0, err
 	}
-	defer reader.Close()
-	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": row.FileName}))
-	c.DataFromReader(http.StatusOK, size, "application/octet-stream", reader, nil)
+	return m.openBackup(ctx, row)
 }
 
 // 保留数量清理与列表删除共用存储适配；插件失败时不删除备份记录。
@@ -417,13 +435,7 @@ func (m *Module) manualSite(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	id, err := m.tasks.Submit(task.Meta{Module: "website", Action: "backup", Target: site.Name, ResourceID: site.ID, Username: auth.Current(c).User.Username, IP: m.auth.ClientIP(c), LockKey: "website:" + site.ID}, func(ctx context.Context, log *task.Log) (any, error) {
-		row, err := m.CreateSite(ctx, site.ID, "", log, ArchiveOptions{})
-		if err != nil {
-			return nil, err
-		}
-		return gin.H{"backupId": row.ID}, nil
-	})
+	id, err := m.SubmitSiteBackup(site.ID, site.Name, "website", auth.Current(c).User.Username, m.auth.ClientIP(c))
 	if err != nil {
 		fail(c, err)
 		return

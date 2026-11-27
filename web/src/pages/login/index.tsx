@@ -11,7 +11,7 @@ import {
   Typography,
   theme,
 } from 'antd';
-import { Lock, Server, User } from 'lucide-react';
+import { KeyRound, Lock, Server, User } from 'lucide-react';
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { branding, login, me } from '../../api/auth';
 import { useAuth } from '../../stores/auth';
@@ -69,7 +69,11 @@ export default function Login() {
       />
     );
   }
-  const submit = async (values: { username: string; password: string }) => {
+  const submit = async (values: {
+    username: string;
+    password: string;
+    totpCode?: string;
+  }) => {
     setBusy(true);
     setError('');
     try {
@@ -132,7 +136,15 @@ export default function Login() {
               登录以管理你的服务器
             </Typography.Text>
           </Flex>
-          {error && <Alert type="error" showIcon message={error} />}
+          {(error || params.get('sso') === 'failed') && (
+            <Alert
+              type="error"
+              showIcon
+              message={
+                error || '单点登录失败，请核对身份账号或使用面板密码登录。'
+              }
+            />
+          )}
           <Form layout="vertical" onFinish={submit} validateTrigger="onBlur">
             <Form.Item
               name="username"
@@ -170,6 +182,31 @@ export default function Login() {
                 size="large"
               />
             </Form.Item>
+            {panel.data?.totpEnabled && (
+              <Form.Item
+                name="totpCode"
+                label="动态口令验证码"
+                rules={[
+                  { required: true, message: '请输入 6 位动态验证码' },
+                  { pattern: /^\d{6}$/, message: '请输入 6 位数字验证码' },
+                ]}
+              >
+                <Input
+                  maxLength={6}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  prefix={
+                    <KeyRound
+                      size={16}
+                      strokeWidth={1.9}
+                      style={{ color: token.colorTextTertiary }}
+                    />
+                  }
+                  placeholder="请输入 6 位动态验证码"
+                  size="large"
+                />
+              </Form.Item>
+            )}
             <Button
               type="primary"
               size="large"
@@ -181,6 +218,11 @@ export default function Login() {
               登录面板
             </Button>
           </Form>
+          {panel.data?.ssoTitle && (
+            <Button block size="large" href="/auth-sso/start">
+              使用{panel.data.ssoTitle}登录
+            </Button>
+          )}
         </Flex>
       </Card>
     </Flex>

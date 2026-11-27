@@ -143,10 +143,12 @@ export default function SystemBar({
           </Button>
         </Flex>
       </Modal>
-      <PanelUpdateModal
-        open={updateOpen}
-        onClose={() => setUpdateOpen(false)}
-      />
+      {updateOpen && (
+        <PanelUpdateModal
+          open={updateOpen}
+          onClose={() => setUpdateOpen(false)}
+        />
+      )}
     </>
   );
 }

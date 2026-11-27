@@ -58,7 +58,7 @@ func SourceOptions(id string) []SourceOption {
 	if UsesDocker(id) {
 		return []SourceOption{{"official", "Docker Hub（引擎默认源）"}, {"custom", "镜像加速地址"}, {"registry", "指定镜像仓库"}}
 	}
-	if id == "phpmyadmin" {
+	if id == "phpmyadmin" || id == "frp" {
 		return rows
 	}
 	switch id {
@@ -119,6 +119,9 @@ func (m *Manager) repository(id string, selected ...SourceSelection) repository 
 	arch := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[runtime.GOARCH]
 	r := repository{key: source}
 	switch id {
+	case "frp":
+		r.label = "Frp 官方源"
+		r.index = "https://api.github.com/repos/fatedier/frp/releases?per_page=30"
 	case "phpmyadmin":
 		r.label = "phpMyAdmin官方源"
 		r.index = "https://www.phpmyadmin.net/home_page/version.json"
@@ -195,6 +198,12 @@ func (m *Manager) fileURL(address string) string {
 	}
 	return address
 }
+var sharedSourceTransport = &http.Transport{
+	MaxIdleConns:        20,
+	MaxIdleConnsPerHost: 5,
+	IdleConnTimeout:     60 * time.Second,
+}
+
 func (m *Manager) sourceRequest(ctx context.Context, address string, limit int64, downloadTimeout ...time.Duration) ([]byte, error) {
 	req, e := http.NewRequestWithContext(ctx, "GET", m.fileURL(address), nil)
 	if e != nil {
@@ -205,7 +214,7 @@ func (m *Manager) sourceRequest(ctx context.Context, address string, limit int64
 	if len(downloadTimeout) > 0 {
 		timeout = downloadTimeout[0]
 	}
-	client := &http.Client{Timeout: timeout, CheckRedirect: func(r *http.Request, via []*http.Request) error {
+	client := &http.Client{Timeout: timeout, Transport: sharedSourceTransport, CheckRedirect: func(r *http.Request, via []*http.Request) error {
 		if len(via) > 5 || r.URL.Scheme != "https" {
 			return errors.New("软件下载仅允许HTTPS重定向")
 		}
@@ -405,7 +414,10 @@ func (m *Manager) Releases(ctx context.Context, id string, refresh bool, selecte
 	if e == nil && id == "phpmyadmin" {
 		rows, e = phpMyAdminReleases(b)
 	}
-	if e == nil && id != "phpmyadmin" {
+	if e == nil && id == "frp" {
+		rows, e = frpReleases(b)
+	}
+	if e == nil && id != "phpmyadmin" && id != "frp" {
 		name := id
 		if id == "mysql-client" {
 			name = "mysql"
@@ -550,7 +562,7 @@ func (m *Manager) mysqlFileVersion(ctx context.Context) (string, error) {
 			return "", e
 		}
 		req.Header.Set("User-Agent", softwareUserAgent)
-		client := http.Client{Timeout: 10 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error {
+		client := &http.Client{Timeout: 10 * time.Second, Transport: sharedSourceTransport, CheckRedirect: func(r *http.Request, via []*http.Request) error {
 			if len(via) > 5 || r.URL.Scheme != "https" {
 				return errors.New("GitHub下载重定向无效")
 			}

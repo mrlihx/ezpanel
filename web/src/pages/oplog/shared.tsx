@@ -28,11 +28,13 @@ export function LogOutput({
   loading,
   error,
   keyword = '',
+  fill = false,
 }: {
   data?: TextLog | null;
   loading: boolean;
   error?: Error | null;
   keyword?: string;
+  fill?: boolean;
 }) {
   const content = keyword
     ? data?.content
@@ -56,7 +58,10 @@ export function LogOutput({
           message="当前仅显示最近一段日志，较早内容未载入。"
         />
       )}
-      <Spin spinning={loading}>
+      <Spin
+        spinning={loading}
+        className={fill ? 'logs-output-fill' : undefined}
+      >
         <LogText className="logs-output" tabIndex={0} aria-label="日志内容">
           {content || (loading ? '正在读取日志…' : '暂无日志')}
         </LogText>

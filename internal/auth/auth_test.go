@@ -264,3 +264,67 @@ func TestExpiredEntryAndTokenPurpose(t *testing.T) {
 		t.Fatal("jwt accepted as entry")
 	}
 }
+
+func TestSevenDayIdleSession(t *testing.T) {
+	s, _ := fixture(t)
+	s.cfg.IdleMinutes = 168 * 60
+	now := time.Now().UTC().Truncate(time.Second)
+	s.now = func() time.Time { return now }
+	var user store.User
+	s.db.First(&user)
+	token, err := s.Issue(user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(167 * time.Hour)
+	if _, err = s.CheckSession(token); err != nil {
+		t.Fatal("168小时以内不应因令牌提前过期", err)
+	}
+	if !s.Touch(token) {
+		t.Fatal("会话活动未延长空闲时间")
+	}
+	now = now.Add(167 * time.Hour)
+	if _, err = s.CheckSession(token); err != nil {
+		t.Fatal("有效活动后仍应保持会话", err)
+	}
+	now = now.Add(time.Hour)
+	if _, err = s.CheckSession(token); err == nil {
+		t.Fatal("达到168小时空闲应退出")
+	}
+}
+
+func TestSourceGuardAllowsPluginWebhook(t *testing.T) {
+	s, cfg := fixture(t)
+	r := gin.New()
+	r.Use(s.EntryGuard())
+	r.Use(s.SourceGuard())
+	r.POST("/plugin-webhooks/:id/:job", func(c *gin.Context) { c.Status(http.StatusOK) })
+	r.POST("/api/settings", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	q := httptest.NewRequest(http.MethodPost, "/plugin-webhooks/demo/sync", nil)
+	q.Host = "panel.example"
+	q.TLS = &tls.ConnectionState{}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, q)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected plugin webhook to bypass SourceGuard X-Panel-Request check, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	r.GET("/"+cfg.Entry, s.EntryGuard(), func(c *gin.Context) { c.Status(http.StatusOK) })
+	entryReq := httptest.NewRequest(http.MethodGet, "/"+cfg.Entry, nil)
+	entryReq.Host = "panel.example"
+	entryReq.TLS = &tls.ConnectionState{}
+	entryW := httptest.NewRecorder()
+	r.ServeHTTP(entryW, entryReq)
+	entryCookie := entryW.Result().Cookies()[0]
+
+	q2 := httptest.NewRequest(http.MethodPost, "/api/settings", nil)
+	q2.Host = "panel.example"
+	q2.TLS = &tls.ConnectionState{}
+	q2.AddCookie(entryCookie)
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, q2)
+	if w2.Code != http.StatusForbidden {
+		t.Fatalf("expected /api/settings without X-Panel-Request to be forbidden, got %d", w2.Code)
+	}
+}

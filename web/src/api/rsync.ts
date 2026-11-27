@@ -8,6 +8,10 @@ export type RsyncSender = {
   username?: string;
   password?: string;
   ruleId?: string;
+  mode: 'incremental' | 'full';
+  bandwidthKb: number;
+  schedule: 'realtime' | 'interval';
+  checkMinutes: number;
 };
 
 export type RsyncRule = {
@@ -37,3 +41,12 @@ export const runRsyncSender = (id: string) =>
   request<{ taskId: string }>(`/api/software/rsync/send/${id}/run`, {
     method: 'POST',
   });
+
+export type RsyncReceiver = {
+  name: string;
+  path: string;
+  username: string;
+  password?: string;
+  enabled: boolean;
+  allow: string;
+};

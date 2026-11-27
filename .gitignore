@@ -12,9 +12,8 @@ dist/
 .dev-docs/
 /dev/
 
-examples/hello-plugin/frontend/node_modules/
-examples/hello-plugin/package/
-examples/hello-plugin/*.zip
-examples/hello-plugin/server/hello-plugin
+examples/ezpanel-demo-plugin/frontend/node_modules/
+examples/ezpanel-demo-plugin/package/
+examples/ezpanel-demo-plugin/*.zip
 .idea/
 scripts/dev-vm.sh

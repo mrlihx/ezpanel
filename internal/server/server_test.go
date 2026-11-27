@@ -77,6 +77,43 @@ func TestFallbackDoesNotMaskMissingResources(t *testing.T) {
 	}
 }
 
+func TestOpaquePluginOriginCanOnlyLoadFrameResources(t *testing.T) {
+	cfg, _ := config.New(t.TempDir())
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql, _ := db.DB()
+	defer sql.Close()
+	a, err := auth.New(db, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := New(Options{Auth: a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router.GET(auth.PluginFramePath, func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	origin := cfg.PanelOrigin("").String()
+	for _, tc := range []struct {
+		path string
+		want int
+	}{
+		{"/plugin-frame/test/1.0.0/123/example/assets/entry.js", http.StatusNoContent},
+		{"/api/auth/branding", http.StatusNotFound},
+		{"/plugin/test/api/status", http.StatusNotFound},
+		{"/plugin-frame.html", http.StatusNotFound},
+	} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, origin+tc.path, nil)
+		req.Header.Set("Origin", "null")
+		router.ServeHTTP(w, req)
+		if w.Code != tc.want {
+			t.Errorf("opaque origin for %s: got %d, want %d", tc.path, w.Code, tc.want)
+		}
+	}
+}
+
 type writeModule struct{ calls *int }
 
 func (writeModule) Name() string { return "test" }

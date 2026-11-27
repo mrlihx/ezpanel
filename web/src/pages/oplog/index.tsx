@@ -35,6 +35,8 @@ const logSources = [
   'journal',
   'slow',
   'transfer',
+  'frps',
+  'frpc',
 ];
 const appDestinations = Object.keys(logApps).map((key) => `apps/${key}`);
 const logDestinations = [
@@ -45,6 +47,14 @@ const logDestinations = [
   'ssh',
   ...appDestinations,
 ];
+const destinations = [
+  ...logDestinations,
+  ...appDestinations.flatMap((path) =>
+    logSources.map((source) => `${path}/${source}`),
+  ),
+];
+const isSupervisorLog = (path: string) =>
+  /^apps\/supervisor\/(?:main|[0-9a-f]{16})$/.test(path);
 
 export default function OpLogPage() {
   const { token } = theme.useToken();
@@ -61,18 +71,13 @@ export default function OpLogPage() {
   const requested = [params.section, params.tab, params.source]
     .filter(Boolean)
     .join('/');
-  const destinations = [
-    ...logDestinations,
-    ...appDestinations.flatMap((path) =>
-      logSources.map((source) => `${path}/${source}`),
-    ),
-  ];
   const { tab: saved, loading } = useRememberedTab(
     'oplogs',
     requested,
     destinations,
+    isSupervisorLog,
   );
-  const valid = destinations.includes(requested);
+  const valid = destinations.includes(requested) || isSupervisorLog(requested);
   if (!valid) {
     if (
       params.tab ||
@@ -113,7 +118,9 @@ export default function OpLogPage() {
       className={
         section === 'website' && tab === 'logs'
           ? 'logs-page logs-page-website'
-          : 'logs-page'
+          : section === 'panel' && tab === 'runtime'
+            ? 'logs-page logs-page-runtime'
+            : 'logs-page'
       }
       style={style}
     >

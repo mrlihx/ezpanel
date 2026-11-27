@@ -1,0 +1,11 @@
+.software-log-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.software-log-content > .panel-log-box-host {
+  flex: 1;
+  min-height: 0;
+}

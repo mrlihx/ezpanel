@@ -132,7 +132,7 @@ func (m *Module) open(c *gin.Context) {
 		response.Fail(c, response.Invalid, err.Error())
 		return
 	}
-	useSocket := server.Network == "unix" && (account.Host == "localhost" || server.SocketPath != m.packages.MySQLSocket())
+	useSocket := server.Network == "unix" && account.Host == "localhost"
 	if err := m.packages.PreparePHPMyAdmin(useSocket); err != nil {
 		response.Fail(c, response.System, response.Summary(err.Error()))
 		return
@@ -277,7 +277,7 @@ func (m *Module) serve(c *gin.Context) {
 			host, dbPort = instance.ContainerIP, instance.ContainerPort
 		}
 	} else if server.Network == "unix" {
-		if account.Host == "localhost" || server.SocketPath != m.packages.MySQLSocket() {
+		if account.Host == "localhost" {
 			host, socket, dbPort = "localhost", server.SocketPath, 0
 		} else {
 			// 默认 Docker MySQL 实例：账号 host 为容器内网网段或 % 时，经 ezpanel-network TCP 连接以匹配授权。

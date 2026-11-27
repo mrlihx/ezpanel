@@ -48,20 +48,29 @@ func phpCLIWrapperContent(id, siteRoot string) string {
 %s%s
 set -eu
 container=%q
+root=%q
 flags="-i"
 if [ -t 0 ] && [ -t 1 ]; then
   flags="-it"
 fi
 cwd=$(pwd 2>/dev/null || true)
+in_root=0
 case "$cwd" in
-  %s|%s/*|/tmp|/tmp/*)
-    exec docker exec $flags -u www-data -w "$cwd" "$container" php "$@"
-    ;;
+  /tmp|/tmp/*) in_root=1 ;;
   *)
-    exec docker exec $flags -u www-data "$container" php "$@"
+    if [ "$cwd" = "$root" ]; then
+      in_root=1
+    elif [ "${cwd#"$root"/}" != "$cwd" ]; then
+      in_root=1
+    fi
     ;;
 esac
-`, phpCLIMarkerPrefix, id, container, root, root)
+if [ "$in_root" = "1" ]; then
+  exec docker exec $flags -u www-data -w "$cwd" "$container" php "$@"
+else
+  exec docker exec $flags -u www-data "$container" php "$@"
+fi
+`, phpCLIMarkerPrefix, id, container, root)
 }
 
 func isManagedPHPCLIFile(path string) (string, bool) {
@@ -131,17 +140,31 @@ func (m *Manager) EnsurePHPCLIWrapper(id string) error {
 	}
 	siteRoot := m.cfg.Current().SiteRoot
 	content := phpCLIWrapperContent(id, siteRoot)
-	tmp := target + ".tmp"
-	if err := os.WriteFile(tmp, []byte(content), 0755); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp, 0755); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, target); err != nil {
-		_ = os.Remove(tmp)
-		return err
+	if existing, err := os.ReadFile(target); err == nil && string(existing) == content {
+		// 内容未变，无需重复写入磁盘
+	} else {
+		f, err := os.CreateTemp(binDir, filepath.Base(target)+".tmp-*")
+		if err != nil {
+			return err
+		}
+		tmp := f.Name()
+		if _, err := f.WriteString(content); err != nil {
+			_ = f.Close()
+			_ = os.Remove(tmp)
+			return err
+		}
+		if err := f.Close(); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+		if err := os.Chmod(tmp, 0755); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+		if err := os.Rename(tmp, target); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
 	}
 	// 如果尚未配置默认 php，则自动指向当前版本。
 	defaultPath := m.phpCLIDefaultPath()
@@ -165,7 +188,12 @@ func (m *Manager) pointDefaultPHPCLI(versionBinPath string) error {
 			return fmt.Errorf("%s 已存在且非面板管理，未覆盖", defaultPath)
 		}
 	}
-	tmp := defaultPath + ".tmp"
+	f, err := os.CreateTemp(filepath.Dir(defaultPath), filepath.Base(defaultPath)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	_ = f.Close()
 	_ = os.Remove(tmp)
 	if err := os.Symlink(versionBinPath, tmp); err != nil {
 		return err

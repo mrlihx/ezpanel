@@ -32,33 +32,35 @@ func (m *Manager) clamAVUpdater(ctx context.Context) (string, bool) {
 	return "", false
 }
 
-func (m *Manager) UpdateClamAVSignatures(ctx context.Context, log func(string)) (err error) {
-	state, err := m.Status(ctx, "clamav")
-	if err != nil {
-		return err
-	}
-	if !state.Installed {
-		return ErrUnsupported
-	}
-	bin, err := m.LookPath("freshclam")
-	if err != nil {
-		return err
-	}
-	if unit, active := m.clamAVUpdater(ctx); active {
-		if _, err = m.Run(ctx, 20*time.Second, nil, systemctlPath, "stop", unit); err != nil {
+func (m *Manager) UpdateClamAVSignatures(ctx context.Context, log func(string)) error {
+	return m.ApplicationChange("clamav", func() (err error) {
+		state, err := m.Status(ctx, "clamav")
+		if err != nil {
 			return err
 		}
-		defer func() {
-			_, restartErr := m.Run(context.WithoutCancel(ctx), 20*time.Second, nil, systemctlPath, "start", unit)
-			err = errors.Join(err, restartErr)
-		}()
-	}
-	conf := "/etc/freshclam.conf"
-	if state.PkgManager == "apt-get" {
-		conf = "/etc/clamav/freshclam.conf"
-	}
-	_, err = m.Stream(ctx, 10*time.Minute, nil, log, bin, "--stdout", "--config-file="+conf)
-	return err
+		if !state.Installed {
+			return ErrUnsupported
+		}
+		bin, err := m.LookPath("freshclam")
+		if err != nil {
+			return err
+		}
+		if unit, active := m.clamAVUpdater(ctx); active {
+			if _, err = m.Run(ctx, 20*time.Second, nil, systemctlPath, "stop", unit); err != nil {
+				return err
+			}
+			defer func() {
+				_, restartErr := m.Run(context.WithoutCancel(ctx), 20*time.Second, nil, systemctlPath, "start", unit)
+				err = errors.Join(err, restartErr)
+			}()
+		}
+		conf := "/etc/freshclam.conf"
+		if state.PkgManager == "apt-get" {
+			conf = "/etc/clamav/freshclam.conf"
+		}
+		_, err = m.Stream(ctx, 10*time.Minute, nil, log, bin, "--stdout", "--config-file="+conf)
+		return err
+	})
 }
 
 func (m *Manager) ScanClamAVDirectory(ctx context.Context, path string, quick bool, log func(string)) (bool, error) {

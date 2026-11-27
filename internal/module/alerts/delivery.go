@@ -31,6 +31,9 @@ func (m *Module) send(ctx context.Context, item channel, title, message string) 
 	if err != nil {
 		return err
 	}
+	if id, ok := strings.CutPrefix(item.Kind, "plugin:"); ok && m.providers != nil {
+		return m.providers.SendProviderNotification(ctx, id, ProviderNotice{ChannelID: item.ID, Target: settings.Target, Title: title, Message: message})
+	}
 	switch item.Kind {
 	case "email":
 		return m.sendEmail(ctx, settings, title, message)
@@ -39,6 +42,52 @@ func (m *Module) send(ctx context.Context, item channel, title, message string) 
 	default:
 		return errors.New("告警渠道类型无效")
 	}
+}
+
+type ProviderNotice struct {
+	ChannelID string `json:"channelId"`
+	Target    string `json:"target"`
+	Title     string `json:"title"`
+	Message   string `json:"message"`
+}
+
+type NotificationProviders interface {
+	NotificationProviderReady(id string) bool
+	SendProviderNotification(ctx context.Context, id string, notice ProviderNotice) error
+}
+
+func (m *Module) SetNotificationProviders(providers NotificationProviders) { m.providers = providers }
+
+func (m *Module) PluginProviderInUse(id string) error {
+	var count int64
+	if err := m.db.Model(&channel{}).Where("kind = ?", "plugin:"+id).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return errors.New("该插件仍有通知渠道，请先移除渠道")
+	}
+	return nil
+}
+
+type PluginChannel struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+func (m *Module) PluginChannels(ctx context.Context) ([]PluginChannel, error) {
+	rows := []PluginChannel{}
+	err := m.db.WithContext(ctx).Model(&channel{}).Select("id, name").Where("enabled = ?", true).Order("name, id").Find(&rows).Error
+	return rows, err
+}
+
+func (m *Module) SendPluginNotice(ctx context.Context, pluginID, channelID, title, message string) error {
+	var item channel
+	if err := m.db.WithContext(ctx).First(&item, "id = ? AND enabled = ?", channelID, true).Error; err != nil {
+		return err
+	}
+	title = "[" + pluginID + "] " + title
+	err := m.send(ctx, item, title, message)
+	return errors.Join(err, m.writeDelivery("plugin:"+pluginID, title, item, err))
 }
 
 func (m *Module) sendWebhook(ctx context.Context, s channelSettings, title, message string) error {

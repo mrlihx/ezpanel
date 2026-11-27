@@ -53,6 +53,7 @@ var releaseTagPattern = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.
 
 type PanelStatus struct {
 	PanelVersion    string `json:"panelVersion"`
+	CurrentTag      string `json:"currentTag,omitempty"`
 	PublicIP        string `json:"publicIp"`
 	RepoURL         string `json:"repoUrl"`
 	LatestVersion   string `json:"latestVersion"`
@@ -66,10 +67,11 @@ type PanelStatus struct {
 }
 
 type panelMetaCache struct {
-	mu            sync.RWMutex
-	publicIP      string
-	publicIPAt    time.Time
-	latestVersion string
+	mu               sync.RWMutex
+	publicIP         string
+	publicIPAt       time.Time
+	refreshingIP     bool
+	latestVersion    string
 	latestTag     string
 	hasUpdate     bool
 	releaseURL    string
@@ -107,11 +109,14 @@ func (m *Module) startPanelMetaLoop(ctx context.Context) {
 }
 
 func (m *Module) panelUpdateErrorFile() string {
-	wd, err := os.Getwd()
-	if err != nil || wd == "" {
-		wd = "/opt/ezpanel"
+	dataDir := ""
+	if m.auth != nil {
+		dataDir = m.auth.CurrentConfig().DataDir()
 	}
-	return filepath.Join(wd, "data", "panel-update-error.txt")
+	if dataDir == "" {
+		dataDir = filepath.Join(".", "data")
+	}
+	return filepath.Join(dataDir, "panel-update-error.txt")
 }
 
 func (m *Module) readLastUpdateError() string {
@@ -120,6 +125,18 @@ func (m *Module) readLastUpdateError() string {
 		return ""
 	}
 	return strings.TrimSpace(string(raw))
+}
+
+func (m *Module) PublicIP(ctx context.Context) string {
+	m.panelMeta.mu.RLock()
+	ip := m.panelMeta.publicIP
+	m.panelMeta.mu.RUnlock()
+	if ip != "" {
+		return ip
+	}
+	subCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return m.refreshPublicIP(subCtx)
 }
 
 func (m *Module) refreshPublicIP(ctx context.Context) string {
@@ -210,7 +227,15 @@ func isNewerPanelRelease(current, latestVersion string) bool {
 	if cur == "" || strings.Contains(cur, "dev") {
 		return false
 	}
-	return compareSemver(latestVersion, cur) > 0
+	if cmp := compareSemver(latestVersion, cur); cmp != 0 {
+		return cmp > 0
+	}
+	_, latestRevision, _ := strings.Cut(latestVersion, "-r")
+	_, currentRevision, _ := strings.Cut(cur, "-r")
+	if len(latestRevision) != len(currentRevision) {
+		return len(latestRevision) > len(currentRevision)
+	}
+	return latestRevision > currentRevision
 }
 
 type githubRelease struct {
@@ -274,7 +299,11 @@ func (m *Module) checkPanelUpdate(ctx context.Context) (PanelStatus, error) {
 		return m.panelStatusSnapshot(), err
 	}
 	latestVer := stripReleaseVersion(rel.TagName)
-	hasUpdate := isNewerPanelRelease(version.Version, latestVer)
+	current := version.ReleaseTag
+	if current == "" {
+		current = version.Version
+	}
+	hasUpdate := isNewerPanelRelease(current, rel.TagName)
 	notes := strings.TrimSpace(rel.Body)
 	if len(notes) > 2000 {
 		notes = notes[:2000] + "\n..."
@@ -300,6 +329,7 @@ func (m *Module) panelStatusSnapshot() PanelStatus {
 	}
 	return PanelStatus{
 		PanelVersion:    version.Version,
+		CurrentTag:      version.ReleaseTag,
 		PublicIP:        m.panelMeta.publicIP,
 		RepoURL:         panelRepoURL,
 		LatestVersion:   m.panelMeta.latestVersion,
@@ -314,8 +344,27 @@ func (m *Module) panelStatusSnapshot() PanelStatus {
 }
 
 func (m *Module) panelStatus(c *gin.Context) {
-	if m.panelMeta.publicIP == "" {
-		go m.refreshPublicIP(context.Background())
+	m.panelMeta.mu.RLock()
+	needIP := m.panelMeta.publicIP == "" && !m.panelMeta.refreshingIP
+	m.panelMeta.mu.RUnlock()
+	if needIP {
+		m.panelMeta.mu.Lock()
+		if m.panelMeta.publicIP == "" && !m.panelMeta.refreshingIP {
+			m.panelMeta.refreshingIP = true
+			ctx := m.ctx
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			go func() {
+				defer func() {
+					m.panelMeta.mu.Lock()
+					m.panelMeta.refreshingIP = false
+					m.panelMeta.mu.Unlock()
+				}()
+				m.refreshPublicIP(ctx)
+			}()
+		}
+		m.panelMeta.mu.Unlock()
 	}
 	response.OK(c, m.panelStatusSnapshot())
 }
@@ -413,7 +462,9 @@ func (m *Module) panelUpdateApply(c *gin.Context) {
 	var in struct {
 		Tag string `json:"tag"`
 	}
-	_ = c.ShouldBindJSON(&in)
+	if c.Request.ContentLength > 0 && !response.Bind(c, &in) {
+		return
+	}
 
 	if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
 		response.Fail(c, response.Invalid, "在线更新仅支持 Linux amd64/arm64 环境")
@@ -553,6 +604,11 @@ func (m *Module) panelUpdateApply(c *gin.Context) {
 	verRes, err := executor.Run(ctx, 10*time.Second, newBinPath, "version")
 	if err != nil || strings.TrimSpace(verRes.Stdout) != targetVer {
 		response.Fail(c, response.Invalid, "新版本程序自检失败（版本号不匹配或无法执行），已中止更新")
+		return
+	}
+	tagRes, err := executor.Run(ctx, 10*time.Second, newBinPath, "version", "--tag")
+	if builtTag := strings.TrimSpace(tagRes.Stdout); err == nil && builtTag != "" && builtTag != tag {
+		response.Fail(c, response.Invalid, "新版本程序的发布标签不匹配，已中止更新")
 		return
 	}
 

@@ -15,6 +15,12 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   expires_at DATETIME NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS auth_totp_uses (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  secret_hash TEXT NOT NULL,
+  time_step INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS login_attempts (
   ip TEXT PRIMARY KEY,
   count INTEGER NOT NULL,
@@ -283,6 +289,11 @@ CREATE TABLE IF NOT EXISTS certificate_orders (
   auto_deploy INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS certificate_order_dns_providers (
+  order_id TEXT PRIMARY KEY REFERENCES certificate_orders(id) ON DELETE CASCADE,
+  plugin_id TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS plugins (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -303,6 +314,53 @@ CREATE TABLE IF NOT EXISTS plugin_kv (
   updated_at DATETIME NOT NULL,
   PRIMARY KEY (plugin_id, key),
   FOREIGN KEY (plugin_id) REFERENCES plugins(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS plugin_history (
+  plugin_id TEXT PRIMARY KEY REFERENCES plugins(id) ON DELETE CASCADE,
+  snapshot TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS plugin_event_deliveries (
+    id TEXT PRIMARY KEY,
+    plugin_id TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+    event_name TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL DEFAULT '',
+    next_at DATETIME NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_plugin_event_ready ON plugin_event_deliveries(status, next_at);
+CREATE INDEX IF NOT EXISTS idx_plugin_event_history ON plugin_event_deliveries(plugin_id, created_at);
+CREATE TABLE IF NOT EXISTS plugin_credentials (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  secret TEXT NOT NULL,
+  updated_at DATETIME NOT NULL
+);
+CREATE TABLE IF NOT EXISTS plugin_sandbox_users (
+  plugin_id TEXT PRIMARY KEY,
+  uid INTEGER NOT NULL UNIQUE
+);
+CREATE TABLE IF NOT EXISTS plugin_credential_bindings (
+  plugin_id TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+  slot TEXT NOT NULL,
+  credential_id TEXT NOT NULL REFERENCES plugin_credentials(id) ON DELETE RESTRICT,
+  PRIMARY KEY (plugin_id, slot)
+);
+CREATE TABLE IF NOT EXISTS auth_sso_flows (
+  state_hash TEXT PRIMARY KEY,
+  nonce TEXT NOT NULL,
+  verifier TEXT NOT NULL,
+  config_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS plugin_webhook_receipts (
+  signature TEXT PRIMARY KEY,
+  expires_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS docker_compose_projects (
@@ -448,6 +506,9 @@ CREATE INDEX IF NOT EXISTS alert_delivery_queue_created ON alert_delivery_queue(
 CREATE INDEX IF NOT EXISTS alert_rule_channels_channel ON alert_rule_channels(channel_id);
 CREATE INDEX IF NOT EXISTS alert_rules_due ON alert_rules(enabled, next_check_at);
 CREATE INDEX IF NOT EXISTS auth_sessions_expiry ON auth_sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_sso_flows_expires_at ON auth_sso_flows(expires_at);
+CREATE INDEX IF NOT EXISTS idx_plugin_webhook_receipts_expires_at ON plugin_webhook_receipts(expires_at);
 CREATE INDEX IF NOT EXISTS docker_compose_revisions_project ON docker_compose_revisions(project_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_certificate_orders_site_created ON certificate_orders(site_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_db_backups_server_id_database_created_at ON db_backups("server_id", "database", "created_at");
@@ -455,6 +516,9 @@ CREATE INDEX IF NOT EXISTS idx_mongo_backups_connection_database ON mongo_backup
 CREATE INDEX IF NOT EXISTS idx_site_backups_website_id_created_at ON site_backups("website_id", "created_at");
 CREATE INDEX IF NOT EXISTS idx_tasks_cron_job_id_started_at ON tasks("cron_job_id", "started_at");
 CREATE INDEX IF NOT EXISTS idx_tasks_module_started_at ON tasks("module", "started_at");
+CREATE INDEX IF NOT EXISTS idx_tasks_log_path ON tasks(log_path);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_started_id ON tasks(started_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_trash_items_deleted_at ON trash_items("deleted_at");
 CREATE INDEX IF NOT EXISTS idx_waf_custom_rules_site ON waf_custom_rules(site_id, priority);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_waf_exemptions_unique ON waf_exemptions(site_id, rule_id, uri);

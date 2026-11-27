@@ -12,6 +12,7 @@ import (
 	"ezpanel/internal/response"
 	"ezpanel/internal/store"
 	"github.com/gin-gonic/gin"
+	securezip "github.com/yeka/zip"
 	"io"
 	"mime"
 	"net/http"
@@ -21,12 +22,17 @@ import (
 	"time"
 )
 
-func archiveWrite(ctx context.Context, w io.Writer, paths []string, format string) error {
+func archiveWrite(ctx context.Context, w io.Writer, paths []string, format, password string) error {
 	var zw *zip.Writer
+	var szw *securezip.Writer
 	var tw *tar.Writer
 	var gz *gzip.Writer
 	if format == "zip" {
-		zw = zip.NewWriter(w)
+		if password != "" {
+			szw = securezip.NewWriter(w)
+		} else {
+			zw = zip.NewWriter(w)
+		}
 	} else {
 		gz = gzip.NewWriter(w)
 		tw = tar.NewWriter(gz)
@@ -55,7 +61,29 @@ func archiveWrite(ctx context.Context, w io.Writer, paths []string, format strin
 				}
 			}
 			var out io.Writer
-			if zw != nil {
+			if szw != nil {
+				h, e := securezip.FileInfoHeader(info)
+				if e != nil {
+					return e
+				}
+				h.Name = name
+				if info.IsDir() {
+					h.Name += "/"
+					h.Method = securezip.Store
+				} else {
+					h.Method = securezip.Deflate
+					h.SetPassword(password)
+					h.SetEncryptionMethod(securezip.AES256Encryption)
+				}
+				out, e = szw.CreateHeader(h)
+				if e != nil {
+					return e
+				}
+				if link != "" {
+					_, e = io.WriteString(out, link)
+					return e
+				}
+			} else if zw != nil {
 				h, e := zip.FileInfoHeader(info)
 				if e != nil {
 					return e
@@ -102,6 +130,9 @@ func archiveWrite(ctx context.Context, w io.Writer, paths []string, format strin
 			return e
 		}
 	}
+	if szw != nil {
+		return szw.Close()
+	}
 	if zw != nil {
 		return zw.Close()
 	}
@@ -112,9 +143,10 @@ func archiveWrite(ctx context.Context, w io.Writer, paths []string, format strin
 }
 func (m *Module) compress(c *gin.Context) {
 	var r struct {
-		Paths  []string `json:"paths"`
-		Dest   string   `json:"dest"`
-		Format string   `json:"format"`
+		Paths    []string `json:"paths"`
+		Dest     string   `json:"dest"`
+		Format   string   `json:"format"`
+		Password string   `json:"password"`
 	}
 	if !response.Bind(c, &r) {
 		return
@@ -127,14 +159,17 @@ func (m *Module) compress(c *gin.Context) {
 		response.Fail(c, response.Invalid, "保存文件名扩展名与压缩类型不一致")
 		return
 	}
+	if len(r.Password) > 1024 || strings.ContainsRune(r.Password, 0) {
+		response.Fail(c, response.Invalid, "压缩密码无效")
+		return
+	}
+	if r.Format == "tar.gz" && r.Password != "" {
+		response.Fail(c, response.Invalid, "tar.gz不支持设置压缩密码，请留空")
+		return
+	}
 	var sevenZip string
 	if r.Format == "7z" {
-		for _, name := range []string{"7zz", "7z", "7za"} {
-			if bin, err := executor.LookPath(name); err == nil {
-				sevenZip = bin
-				break
-			}
-		}
+		sevenZip = findSevenZip()
 		if sevenZip == "" {
 			response.Fail(c, response.Invalid, "7z压缩需要安装服务器的7zip软件包")
 			return
@@ -198,7 +233,12 @@ func (m *Module) compress(c *gin.Context) {
 			}
 			// 固定工作目录保留所选项目名称；禁用通配和列表文件解析，链接按链接归档。
 			for parent, names := range groups {
-				args := append([]string{"a", "-t7z", "-snl", "-sse", "-spd", "-y", "--", part}, names...)
+				args := []string{"a", "-t7z", "-snl", "-sse", "-spd", "-y"}
+				if r.Password != "" {
+					args = append(args, "-p"+r.Password, "-mhe=on")
+				}
+				args = append(args, "--", part)
+				args = append(args, names...)
 				if _, e = executor.RunFixed(ctx, time.Hour, parent, nil, sevenZip, args...); e != nil {
 					return e
 				}
@@ -209,7 +249,7 @@ func (m *Module) compress(c *gin.Context) {
 			return e
 		}
 		if r.Format != "7z" {
-			e = archiveWrite(ctx, f, paths, r.Format)
+			e = archiveWrite(ctx, f, paths, r.Format, r.Password)
 		}
 		if e == nil {
 			e = f.Chmod(0755)
@@ -285,7 +325,7 @@ func (m *Module) download(c *gin.Context) {
 	if c.Request.Method == http.MethodHead {
 		return
 	}
-	if e = archiveWrite(c.Request.Context(), c.Writer, []string{p}, "zip"); e != nil {
+	if e = archiveWrite(c.Request.Context(), c.Writer, []string{p}, "zip", ""); e != nil {
 		panic(http.ErrAbortHandler)
 	}
 	success = true

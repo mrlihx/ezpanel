@@ -20,11 +20,11 @@ func (m *Module) recordPoint(point Point) {
 	m.history = append(m.history, point)
 }
 
-func (m *Module) historyPoints(c *gin.Context) {
+func (m *Module) HistoryPoints(c *gin.Context) {
 	start, startErr := strconv.ParseInt(c.Query("start"), 10, 64)
 	end, endErr := strconv.ParseInt(c.Query("end"), 10, 64)
 	if startErr != nil || endErr != nil || start > end {
-		response.Fail(c, 1001, "时间范围无效")
+		response.Fail(c, response.Invalid, "时间范围无效")
 		return
 	}
 	points := []Point{}

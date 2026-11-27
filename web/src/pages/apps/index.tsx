@@ -31,7 +31,6 @@ import {
   catalog,
   installApplication,
   updateApplication,
-  switchApplication,
   checkApplicationUpdates,
   uninstallApplication,
   applicationService,
@@ -42,7 +41,7 @@ import {
 } from '../../api/software';
 import { listTasks } from '../../api/task';
 import { registries } from '../../api/docker';
-import type { Plugin } from '../../api/plugin';
+import { pluginStatusLabel, type Plugin } from '../../api/plugin';
 import PluginsPage from '../plugins';
 import { useMessageBox } from '../../stores/messageBox';
 import { useRoutedTab } from '../../hooks/useRoutedTab';
@@ -85,7 +84,7 @@ export default function AppStorePage() {
   const [selected, setSelected] = useState<Application>();
   const [manualOperation, setManualOperation] = useState<{
     app: Application;
-    action: 'install' | 'uninstall' | 'update' | 'switch';
+    action: 'install' | 'uninstall' | 'update';
     version?: string;
     environmentId?: string;
     instanceId?: string;
@@ -203,9 +202,7 @@ export default function AppStorePage() {
       return;
     const { list, current, mirrors } = sources.data;
     const remember =
-      operation.action === 'install' ||
-      operation.action === 'update' ||
-      operation.action === 'switch';
+      operation.action === 'install' || operation.action === 'update';
     const previous = remember
       ? localStorage.getItem(`${sourcePreference}.type`)
       : null;
@@ -286,13 +283,10 @@ export default function AppStorePage() {
         b.version.localeCompare(a.version, 'en', { numeric: true }),
       )
     : releaseList;
-  const switchTargets =
-    versions.data?.list.filter((r) => r.version !== operation?.app.version) ??
-    [];
   const upgradeTarget = versions.data?.list.find(
     (r) =>
       operation?.app.version &&
-      (r.method === 'package'
+      (r.method === 'package' || operation.app.id === 'frp'
         ? r.version === operation.app.updateVersion
         : r.version.split('.').slice(0, 2).join('.') ===
             operation.app.version.split('.').slice(0, 2).join('.') &&
@@ -318,12 +312,7 @@ export default function AppStorePage() {
           : operation.app.version;
       if (value) patch.version = value;
     }
-    const target =
-      operation.action === 'switch'
-        ? versions.data?.list.find(
-            (item) => item.version !== operation.app.version,
-          )
-        : upgradeTarget;
+    const target = upgradeTarget;
     if (target && !manualVersions.current.target)
       patch.targetVersion = target.version;
     if (Object.keys(patch).length) form.setFieldsValue(patch);
@@ -376,7 +365,7 @@ export default function AppStorePage() {
   };
   function openOperation(
     app: Application,
-    action: 'install' | 'uninstall' | 'update' | 'switch',
+    action: 'install' | 'uninstall' | 'update',
     version?: string,
     options?: {
       environmentId?: string;
@@ -439,30 +428,28 @@ export default function AppStorePage() {
     setWorking(true);
     try {
       const result =
-        action === 'switch'
-          ? await switchApplication(app.id, values.targetVersion, selection)
-          : action === 'update'
-            ? await updateApplication(
+        action === 'update'
+          ? await updateApplication(
+              app.id,
+              values.targetVersion,
+              selection,
+              operation.instanceId,
+            )
+          : action === 'install'
+            ? await installApplication(
                 app.id,
-                values.targetVersion,
+                values.version,
                 selection,
-                operation.instanceId,
+                operation.newInstance
+                  ? { newInstance: true, instanceName: values.instanceName }
+                  : undefined,
               )
-            : action === 'install'
-              ? await installApplication(
-                  app.id,
-                  values.version,
-                  selection,
-                  operation.newInstance
-                    ? { newInstance: true, instanceName: values.instanceName }
-                    : undefined,
-                )
-              : await uninstallApplication(
-                  app.id,
-                  values.confirmName,
-                  operation.environmentId,
-                );
-      if (action === 'install' || action === 'update' || action === 'switch') {
+            : await uninstallApplication(
+                app.id,
+                values.confirmName,
+                operation.environmentId,
+              );
+      if (action === 'install' || action === 'update') {
         localStorage.setItem(`${sourcePreference}.type`, selection.source);
         if (
           selection.mirror &&
@@ -529,6 +516,28 @@ export default function AppStorePage() {
             onClick={() => openOperation(app, 'update')}
           >
             更新
+          </Button>
+        )}
+        {app.composeMissing && (
+          <Button
+            type="link"
+            style={{ padding: 0 }}
+            disabled={appBusy(app)}
+            onClick={() =>
+              modal.confirm({
+                title: '补装 Docker Compose？',
+                onOk: async () => {
+                  const result = await installApplication(app.id);
+                  useMessageBox.getState().show(result.taskId);
+                  void client.invalidateQueries({
+                    queryKey: ['software-tasks'],
+                  });
+                  refresh();
+                },
+              })
+            }
+          >
+            补装 Compose
           </Button>
         )}
         <Button
@@ -688,7 +697,12 @@ export default function AppStorePage() {
       key: 'version',
       className: 'app-catalog-version',
       render: (_, app) => {
-        if (!app.installed) return app.version || '—';
+        const displayVersion = (version: string) =>
+          app.category === 'tools'
+            ? (version.match(/^(?:\d+:)?(\d+(?:\.\d+)+)/)?.[1] ?? version)
+            : version;
+        if (!app.installed)
+          return app.version ? displayVersion(app.version) : '—';
         const versions =
           app.id === 'php'
             ? phpInstalled.map((branch) => ({
@@ -717,14 +731,16 @@ export default function AppStorePage() {
             {versions.map(({ key, version, updateVersion }) => (
               <Tooltip
                 key={key}
-                title={updateVersion && `可升级至 ${updateVersion}`}
+                title={
+                  updateVersion && `可升级至 ${displayVersion(updateVersion)}`
+                }
               >
                 <Tag
                   color={updateVersion ? 'red' : undefined}
                   icon={updateVersion ? <ArrowUpOutlined /> : undefined}
                   style={{ marginInlineEnd: 0 }}
                 >
-                  {version}
+                  {displayVersion(version)}
                 </Tag>
               </Tooltip>
             ))}
@@ -772,6 +788,23 @@ export default function AppStorePage() {
               />
             </Button>
           );
+        if (app.plugin) {
+          const { runtimeStatus, runtimeError } = app.plugin;
+          return (
+            <Tooltip title={runtimeError}>
+              <Badge
+                status={
+                  runtimeStatus === 'running'
+                    ? 'success'
+                    : runtimeStatus === 'failed'
+                      ? 'error'
+                      : 'default'
+                }
+                text={pluginStatusLabel[runtimeStatus] ?? runtimeStatus}
+              />
+            </Tooltip>
+          );
+        }
         if (app.category === 'database' && app.instanceCount) {
           const running = app.runningInstances ?? 0;
           return (
@@ -810,13 +843,11 @@ export default function AppStorePage() {
                   ? `${phpInstalled.filter((php) => php.running === true).length} 个运行中`
                   : !app.installed
                     ? '未安装'
-                    : app.plugin && !app.plugin.enabled
-                      ? '未启用'
-                      : app.running === true
-                        ? '运行中'
-                        : app.running === false
-                          ? '已停止'
-                          : '已安装'
+                    : app.running === true
+                      ? '运行中'
+                      : app.running === false
+                        ? '已停止'
+                        : '已安装'
               }
             />
           </Tooltip>
@@ -1127,10 +1158,6 @@ export default function AppStorePage() {
           key={current.id}
           app={current}
           busy={appBusy(current)}
-          switchVersion={() => {
-            setSelected(undefined);
-            openOperation(current, 'switch');
-          }}
           control={(action) => control(current, action)}
           uninstall={() => {
             setSelected(undefined);
@@ -1146,7 +1173,7 @@ export default function AppStorePage() {
       <Modal
         title={
           operation
-            ? `${operation.action === 'install' ? '安装' : operation.action === 'update' ? '更新' : operation.action === 'switch' ? '切换版本' : '卸载'} ${operation.app.name}${operation.version ? ` ${operation.version}` : ''}`
+            ? `${operation.action === 'install' ? '安装' : operation.action === 'update' ? '更新' : '卸载'} ${operation.app.name}${operation.version ? ` ${operation.version}` : ''}`
             : ''
         }
         open={!!operation}
@@ -1158,7 +1185,7 @@ export default function AppStorePage() {
         okText={
           operation?.action === 'uninstall'
             ? '确认卸载'
-            : operation?.action === 'update' || operation?.action === 'switch'
+            : operation?.action === 'update'
               ? '构建并切换'
               : '立即安装'
         }
@@ -1170,11 +1197,7 @@ export default function AppStorePage() {
               sources.isFetching ||
               !releaseList.some((item) => !item.unavailableReason) ||
               versions.isFetching ||
-              ((operation?.action === 'update' ||
-                operation?.action === 'switch') &&
-                !(operation.action === 'switch'
-                  ? switchTargets.length
-                  : upgradeTarget))),
+              (operation?.action === 'update' && !upgradeTarget)),
         }}
         destroyOnHidden
       >
@@ -1202,10 +1225,7 @@ export default function AppStorePage() {
                     onChange={() => {
                       manualVersions.current.version = true;
                     }}
-                    disabled={
-                      operation.action === 'update' ||
-                      operation.action === 'switch'
-                    }
+                    disabled={operation.action === 'update'}
                     loading={versions.isFetching}
                     placeholder="请选择版本"
                     options={installVersionOptions.map((r) => ({
@@ -1224,8 +1244,7 @@ export default function AppStorePage() {
                     }))}
                   />
                 </Form.Item>
-                {(operation.action === 'update' ||
-                  operation.action === 'switch') && (
+                {operation.action === 'update' && (
                   <Form.Item
                     name="targetVersion"
                     label="更新目标"
@@ -1236,19 +1255,14 @@ export default function AppStorePage() {
                         manualVersions.current.target = true;
                       }}
                       options={
-                        operation.action === 'switch'
-                          ? switchTargets.map((r) => ({
-                              value: r.version,
-                              label: r.version,
-                            }))
-                          : upgradeTarget
-                            ? [
-                                {
-                                  value: upgradeTarget.version,
-                                  label: upgradeTarget.version,
-                                },
-                              ]
-                            : []
+                        upgradeTarget
+                          ? [
+                              {
+                                value: upgradeTarget.version,
+                                label: upgradeTarget.version,
+                              },
+                            ]
+                          : []
                       }
                       placeholder="当前源未发现同系列较新版本"
                     />
@@ -1387,8 +1401,7 @@ export default function AppStorePage() {
                 {versions.error && (
                   <Alert type="error" message={versions.error.message} />
                 )}
-                {(operation.action === 'update' ||
-                  operation.action === 'switch') && (
+                {operation.action === 'update' && (
                   <Alert
                     type="info"
                     message={

@@ -1,5 +1,4 @@
-import LogText from '../../components/LogText';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   App,
@@ -7,18 +6,13 @@ import {
   Button,
   Card,
   Checkbox,
-  Descriptions,
-  Drawer,
-  Dropdown,
-  Empty,
   Flex,
   Form,
-  Input,
   Modal,
   Popconfirm,
   Space,
-  Spin,
   Tag,
+  Tooltip,
   Typography,
   Upload,
 } from 'antd';
@@ -28,63 +22,20 @@ import {
   inspectPlugin,
   pluginAction,
   pluginDetail,
+  pluginStatusLabel,
   usePluginList,
   type Detail,
   type Inspection,
-  type Manifest,
   type Plugin,
 } from '../../api/plugin';
 import { request } from '../../api/client';
 import TaskDrawer from '../../components/TaskDrawer';
-import { LAYOUT, MONO_FONT, SPACING } from '../../styles/tokens';
+import { LAYOUT, SPACING } from '../../styles/tokens';
 import { formatTime } from '../../utils/format';
+import PluginSettings from './PluginSettings';
+import PluginAccessReview from './PluginAccessReview';
 
-type Mode = 'install' | 'upgrade' | 'enable' | 'uninstall';
-const trust =
-  '插件前端拥有当前管理员访问能力；后端降权但插件间不隔离，请仅启用可信来源插件。execAllow 授予命令及参数可达到的 root 能力，fsRoots 仅限制 Host 文件入口，并非插件的全部能力边界。';
-const statusLabel: Record<string, string> = {
-  disabled: '未启用',
-  starting: '启动中',
-  running: '运行中',
-  stopping: '停止中',
-  crashed: '已崩溃',
-  failed: '启动失败',
-};
-function ManifestSummary({ manifest }: { manifest: Manifest }) {
-  return (
-    <Descriptions
-      column={1}
-      size="small"
-      items={[
-        {
-          key: 'name',
-          label: '插件',
-          children: `${manifest.name} / ${manifest.id}`,
-        },
-        {
-          key: 'version',
-          label: '版本 / 作者',
-          children: `${manifest.version} / ${manifest.author || '未提供'}`,
-        },
-        {
-          key: 'permissions',
-          label: '权限',
-          children: manifest.permissions?.join('、') || '默认 KV / 日志',
-        },
-        {
-          key: 'exec',
-          label: 'root 命令白名单',
-          children: manifest.execAllow?.join('、') || '无',
-        },
-        {
-          key: 'fs',
-          label: 'root 目录白名单',
-          children: manifest.fsRoots?.join('、') || '无',
-        },
-      ]}
-    />
-  );
-}
+type Mode = 'install' | 'enable' | 'uninstall';
 export default function PluginsPage({
   keyword = '',
   renderList,
@@ -104,14 +55,11 @@ export default function PluginsPage({
   const [selected, setSelected] = useState<Plugin>();
   const [detail, setDetail] = useState<Detail>();
   const [inspection, setInspection] = useState<Inspection>();
+  const [confirmedUploadId, setConfirmedUploadId] = useState<string>();
+  const [signature, setSignature] = useState<File>();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [configOpen, setConfigOpen] = useState(false);
-  const [configPluginId, setConfigPluginId] = useState<string>();
-  const [configDetail, setConfigDetail] = useState<Detail>();
-  const [configError, setConfigError] = useState('');
-  const [configBusy, setConfigBusy] = useState(false);
-  const [logs, setLogs] = useState<Plugin>();
+  const [settingsPluginId, setSettingsPluginId] = useState<string>();
   const [task, setTask] = useState<{
     id: string;
     action: string;
@@ -119,13 +67,28 @@ export default function PluginsPage({
   }>();
   const [installed, setInstalled] = useState<string>();
   const [form] = Form.useForm();
-  const [configForm] = Form.useForm();
+  const existingPlugin =
+    mode === 'install' && inspection
+      ? query.data?.find((item) => item.id === inspection.manifest.id)
+      : undefined;
+  const isUpgrade = Boolean(
+    mode === 'install' &&
+    inspection &&
+    (inspection.installedVersion || existingPlugin),
+  );
+  const currentVersion =
+    inspection?.installedVersion || existingPlugin?.version || '';
+  const needsRiskConfirmation = mode === 'install';
+  const riskConfirmed =
+    !!inspection && inspection.uploadId === confirmedUploadId;
   const refresh = () => client.invalidateQueries({ queryKey: ['plugins'] });
   const open = async (next: Mode, plugin?: Plugin) => {
     setMode(next);
     setSelected(plugin);
     setDetail(undefined);
     setInspection(undefined);
+    setConfirmedUploadId(undefined);
+    setSignature(undefined);
     setError('');
     form.resetFields();
     if (plugin) {
@@ -143,10 +106,17 @@ export default function PluginsPage({
     setBusy(true);
     setError('');
     setInspection(undefined);
+    setConfirmedUploadId(undefined);
+    setDetail(undefined);
+    setSelected(undefined);
     try {
-      const result = await inspectPlugin(file);
-      if (mode === 'upgrade' && result.manifest.id !== selected?.id)
-        throw new Error('升级包 id 与当前插件不匹配');
+      const result = await inspectPlugin(file, signature);
+      const existing = query.data?.find(
+        (item) => item.id === result.manifest.id,
+      );
+      if (result.installedVersion || existing) {
+        setSelected(existing);
+      }
       setInspection(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : '检查失败');
@@ -154,11 +124,8 @@ export default function PluginsPage({
       setBusy(false);
     }
   };
-  const submit = async (values: {
-    purgeData?: boolean;
-    values?: Record<string, string>;
-  }) => {
-    if (!mode) return;
+  const submit = async (values: { purgeData?: boolean }) => {
+    if (!mode || busy || (needsRiskConfirmation && !riskConfirmed)) return;
     setBusy(true);
     setError('');
     try {
@@ -171,22 +138,26 @@ export default function PluginsPage({
         const data =
           mode === 'uninstall'
             ? { purgeData: !!values.purgeData }
-            : {
-                uploadId: inspection!.uploadId,
-                ...(mode === 'upgrade' ? { values: values.values } : {}),
-              };
+            : { uploadId: inspection!.uploadId };
+        const targetId = inspection?.manifest.id ?? selected?.id ?? '';
         const result =
           mode === 'install'
-            ? await request<{ taskId: string }>('/api/plugins/install', {
-                method: 'POST',
-                data,
-                silentError: true,
-              })
+            ? isUpgrade
+              ? await pluginAction<{ taskId: string }>(
+                  targetId,
+                  'upgrade',
+                  data,
+                )
+              : await request<{ taskId: string }>('/api/plugins/install', {
+                  method: 'POST',
+                  data,
+                  silentError: true,
+                })
             : await pluginAction<{ taskId: string }>(selected!.id, mode, data);
         setTask({
           id: result.taskId,
-          action: mode,
-          pluginId: inspection?.manifest.id ?? selected?.id,
+          action: isUpgrade ? 'upgrade' : mode,
+          pluginId: targetId,
         });
         setMode(undefined);
       }
@@ -212,110 +183,117 @@ export default function PluginsPage({
       message.error(e instanceof Error ? e.message : '停用失败');
     }
   };
-  const configure = async (plugin: Plugin) => {
-    setConfigPluginId(plugin.id);
-    setConfigError('');
-    setConfigBusy(true);
-    setConfigOpen(true);
-    setConfigDetail(undefined);
+  const settingsPlugin = query.data?.find(
+    (plugin) => plugin.id === settingsPluginId,
+  );
+  const rollback = async (plugin: Plugin) => {
     try {
-      const d = await pluginDetail(plugin.id);
-      setConfigDetail(d);
-    } catch (e) {
-      setConfigError(e instanceof Error ? e.message : '配置读取失败');
-    } finally {
-      setConfigBusy(false);
-    }
-  };
-  const saveConfig = async (input: {
-    values?: Record<string, string>;
-    clear?: Record<string, boolean>;
-  }) => {
-    if (!configDetail) return;
-    const values = { ...input.values };
-    for (const field of configDetail.manifest.env ?? []) {
-      if (field.secret) {
-        if (input.clear?.[field.key]) values[field.key] = '';
-        else if (!values[field.key]) delete values[field.key];
-      }
-    }
-    setConfigBusy(true);
-    setConfigError('');
-    try {
-      await request(`/api/plugins/${configPluginId}/config`, {
-        method: 'PUT',
-        data: { values },
+      const previous = await request<{
+        version: string;
+        revokedGrants?: string[];
+      }>(`/api/plugins/${encodeURIComponent(plugin.id)}/rollback`, {
         silentError: true,
       });
-      await refresh();
-      setConfigOpen(false);
-      message.success('配置已保存，运行状态已恢复');
-    } catch (e) {
-      setConfigError(e instanceof Error ? e.message : '保存失败');
-    } finally {
-      setConfigBusy(false);
+      modal.confirm({
+        title: `恢复「${plugin.name}」至 ${previous.version}？`,
+        content: (
+          <>
+            <p>将以快照还原插件包、配置、KV 和插件私有数据。</p>
+            {!!previous.revokedGrants?.length && (
+              <p>
+                需要重新授权或设置的项目 · {previous.revokedGrants.join('、')}
+              </p>
+            )}
+          </>
+        ),
+        okText: '恢复',
+        okButtonProps: { danger: true },
+        onOk: async () => {
+          try {
+            const result = await pluginAction<{ taskId: string }>(
+              plugin.id,
+              'rollback',
+              { version: previous.version },
+            );
+            setTask({
+              id: result.taskId,
+              action: '恢复插件版本',
+              pluginId: plugin.id,
+            });
+          } catch (error) {
+            void message.error(
+              error instanceof Error ? error.message : '恢复失败',
+            );
+            throw error;
+          }
+        },
+      });
+    } catch (error) {
+      void message.error(
+        error instanceof Error ? error.message : '读取快照失败',
+      );
     }
   };
-  const configPlugin = query.data?.find((p) => p.id === configPluginId);
-  const manifest = mode === 'enable' ? detail?.manifest : inspection?.manifest;
-  const pluginControls = (p: Plugin) => (
-    <Space>
-      {p.activeTaskId ? (
-        <Button
-          type="link"
-          onClick={() => setTask({ id: p.activeTaskId, action: '插件任务' })}
-        >
-          查看任务
-        </Button>
-      ) : p.enabled ? (
-        <Popconfirm
-          title="确认停用插件并断开其连接？"
-          onConfirm={() => disable(p)}
-        >
-          <Button type="link">停用</Button>
-        </Popconfirm>
-      ) : (
-        <Button type="link" onClick={() => void open('enable', p)}>
-          启用
-        </Button>
-      )}
-      {p.runtimeStatus === 'running' && (
-        <Button type="link" onClick={() => navigate(`/p/${p.id}`)}>
-          打开
-        </Button>
-      )}
-      {p.type === 'process' && (
-        <>
+  const reviewed = mode === 'enable' ? detail : inspection;
+  const permissionChanges = inspection?.permissionChanges;
+  const hasPermissionChanges = !!(
+    permissionChanges?.permissions?.length ||
+    permissionChanges?.execAllow?.length ||
+    permissionChanges?.fsRoots?.length ||
+    inspection?.revokedGrants?.length
+  );
+  const pluginControls = (p: Plugin) => {
+    const disabledByTask = !!p.activeTaskId;
+    return (
+      <Space wrap>
+        {p.activeTaskId && (
           <Button
-            type="link"
-            disabled={!!p.activeTaskId}
-            onClick={() => void configure(p)}
+            onClick={() => setTask({ id: p.activeTaskId, action: '插件任务' })}
           >
-            配置
+            查看任务
           </Button>
-          <Button type="link" onClick={() => setLogs(p)}>
-            日志
+        )}
+        {p.runtimeStatus === 'running' && (
+          <Button
+            disabled={disabledByTask}
+            onClick={() => {
+              const target = `/p/${encodeURIComponent(p.id)}`;
+              if (p.openMode === 'new_tab') {
+                window.open(target, '_blank', 'noopener,noreferrer');
+              } else {
+                setSettingsPluginId(undefined);
+                navigate(target);
+              }
+            }}
+          >
+            打开
           </Button>
-        </>
-      )}
-      <Dropdown
-        menu={{
-          items: [
-            ...(p.type === 'process' && p.enabled
-              ? [
-                  {
-                    key: 'restart',
-                    label: p.runtimeStatus === 'failed' ? '重试启动' : '重启',
-                  },
-                ]
-              : []),
-            { key: 'upgrade', label: '升级' },
-            { key: 'uninstall', label: '卸载', danger: true },
-          ],
-          onClick: ({ key }) => {
-            if (key === 'restart')
+        )}
+        {p.enabled ? (
+          <Popconfirm
+            title="确认停止插件并断开其连接？"
+            onConfirm={() => disable(p)}
+          >
+            <Button disabled={disabledByTask}>停止</Button>
+          </Popconfirm>
+        ) : (
+          <Button
+            type="primary"
+            disabled={disabledByTask}
+            onClick={() => void open('enable', p)}
+          >
+            启动
+          </Button>
+        )}
+        {p.type === 'process' && (
+          <Button
+            disabled={disabledByTask || !p.enabled}
+            onClick={() =>
               modal.confirm({
-                title: '确认重启插件？',
+                title:
+                  p.runtimeStatus === 'failed'
+                    ? '确认重试启动插件？'
+                    : '确认重启插件？',
                 onOk: async () => {
                   try {
                     await pluginAction(p.id, 'restart');
@@ -325,40 +303,45 @@ export default function PluginsPage({
                     message.error(e instanceof Error ? e.message : '重启失败');
                   }
                 },
-              });
-            else void open(key as Mode, p);
-          },
-        }}
-        disabled={!!p.activeTaskId}
-      >
-        <Button type="link">更多</Button>
-      </Dropdown>
-    </Space>
-  );
-  const actions = (plugin: Plugin) =>
-    renderList ? (
-      <Space size={12}>
-        <Button
-          type="link"
-          style={{ padding: 0 }}
-          disabled={!!plugin.activeTaskId}
-          onClick={() => void configure(plugin)}
-        >
-          设置
+              })
+            }
+          >
+            {p.runtimeStatus === 'failed' ? '重试启动' : '重启'}
+          </Button>
+        )}
+        <Button disabled={disabledByTask} onClick={() => void rollback(p)}>
+          恢复历史版本
         </Button>
         <Button
-          type="link"
           danger
-          style={{ padding: 0 }}
-          disabled={!!plugin.activeTaskId}
-          onClick={() => void open('uninstall', plugin)}
+          disabled={disabledByTask}
+          onClick={() => void open('uninstall', p)}
         >
           卸载
         </Button>
       </Space>
-    ) : (
-      pluginControls(plugin)
     );
+  };
+  const actions = (plugin: Plugin) => (
+    <Space size={12}>
+      <Button
+        type="link"
+        style={{ padding: 0 }}
+        onClick={() => setSettingsPluginId(plugin.id)}
+      >
+        设置
+      </Button>
+      <Button
+        type="link"
+        danger
+        style={{ padding: 0 }}
+        disabled={!!plugin.activeTaskId}
+        onClick={() => void open('uninstall', plugin)}
+      >
+        卸载
+      </Button>
+    </Space>
+  );
   return (
     <>
       {!renderList && (
@@ -432,17 +415,19 @@ export default function PluginsPage({
                 title: '运行状态',
                 key: 'status',
                 render: (_, p) => (
-                  <Tag
-                    color={
-                      p.runtimeStatus === 'running'
-                        ? 'success'
-                        : p.runtimeStatus === 'failed'
-                          ? 'error'
-                          : 'default'
-                    }
-                  >
-                    {statusLabel[p.runtimeStatus] ?? p.runtimeStatus}
-                  </Tag>
+                  <Tooltip title={p.runtimeError}>
+                    <Tag
+                      color={
+                        p.runtimeStatus === 'running'
+                          ? 'success'
+                          : p.runtimeStatus === 'failed'
+                            ? 'error'
+                            : 'default'
+                      }
+                    >
+                      {pluginStatusLabel[p.runtimeStatus] ?? p.runtimeStatus}
+                    </Tag>
+                  </Tooltip>
                 ),
               },
               { title: '描述', dataIndex: 'description' },
@@ -463,22 +448,74 @@ export default function PluginsPage({
       <Modal
         title={
           mode === 'install'
-            ? '安装插件'
-            : mode === 'upgrade'
-              ? `升级插件 · ${selected?.version} → ${inspection?.manifest.version ?? '待检查'}`
-              : mode === 'enable'
-                ? '启用插件'
-                : '卸载插件'
+            ? isUpgrade
+              ? `升级插件 · ${currentVersion} → ${inspection?.manifest.version ?? '待检查'}`
+              : '导入扩展应用'
+            : mode === 'enable'
+              ? '启用插件'
+              : '卸载插件'
         }
         open={!!mode}
         onCancel={() => {
           if (!busy) setMode(undefined);
         }}
-        footer={null}
+        centered
+        footer={
+          <Flex
+            align="center"
+            wrap
+            gap={SPACING.sm}
+            style={{ textAlign: 'start' }}
+          >
+            {needsRiskConfirmation && inspection && (
+              <Checkbox
+                checked={riskConfirmed}
+                disabled={busy}
+                onChange={(event) =>
+                  setConfirmedUploadId(
+                    event.target.checked ? inspection.uploadId : undefined,
+                  )
+                }
+              >
+                我已查看插件权限和风险提示，确认继续。
+              </Checkbox>
+            )}
+            <Button
+              type="primary"
+              danger={mode === 'uninstall'}
+              htmlType="submit"
+              form="plugin-operation-form"
+              loading={busy}
+              disabled={
+                (needsRiskConfirmation && !riskConfirmed) ||
+                (mode === 'enable' && !detail)
+              }
+              style={{ marginInlineStart: 'auto' }}
+            >
+              确认
+              {mode === 'enable'
+                ? '启用'
+                : mode === 'uninstall'
+                  ? '卸载'
+                  : isUpgrade
+                    ? '升级'
+                    : '安装'}
+            </Button>
+          </Flex>
+        }
         destroyOnHidden
-        width={LAYOUT.modalWidth}
+        width={
+          mode === 'uninstall' ? LAYOUT.modalWidth : LAYOUT.databaseModalWidth
+        }
+        styles={{
+          body: {
+            maxHeight: 'min(68dvh, calc(100dvh - 150px))',
+            overflowY: 'auto',
+          },
+        }}
       >
         <Form
+          id="plugin-operation-form"
           form={form}
           layout="horizontal"
           labelCol={{ flex: LAYOUT.formLabelWidth }}
@@ -496,90 +533,112 @@ export default function PluginsPage({
               style={{ marginBottom: SPACING.lg }}
             />
           )}
-          {(mode === 'install' || mode === 'upgrade') && (
-            <Upload
-              beforeUpload={(file) => {
-                void inspect(file);
-                return false;
-              }}
-              accept=".zip"
-              showUploadList={false}
-              disabled={busy}
-            >
-              <Button loading={busy}>选择 ZIP 并检查</Button>
-            </Upload>
-          )}
-          {manifest && (
-            <Space
-              direction="vertical"
-              size={SPACING.lg}
-              style={{ width: '100%', marginBlock: SPACING.lg }}
-            >
-              <ManifestSummary manifest={manifest} />
-              <Alert
-                type="warning"
-                showIcon
-                message="仅安装和启用可信插件"
-                description={trust}
-              />
+          {mode === 'install' && (
+            <Space wrap>
+              <Upload
+                beforeUpload={(file) => {
+                  setSignature(file);
+                  setInspection(undefined);
+                  setError('');
+                  return false;
+                }}
+                accept=".sig"
+                showUploadList={false}
+                disabled={busy}
+              >
+                <Button>选择签名文件（可选）</Button>
+              </Upload>
+              {signature && (
+                <Tag
+                  closable={!busy}
+                  onClose={() => {
+                    setSignature(undefined);
+                    setInspection(undefined);
+                    setError('');
+                  }}
+                >
+                  {signature.name}
+                </Tag>
+              )}
+              <Upload
+                beforeUpload={(file) => {
+                  void inspect(file);
+                  return false;
+                }}
+                accept=".zip"
+                showUploadList={false}
+                disabled={busy}
+              >
+                <Button loading={busy}>选择 ZIP 并检查</Button>
+              </Upload>
+              {inspection?.signatureVerified && (
+                <Tag color="success">签名已验证</Tag>
+              )}
             </Space>
           )}
-          {inspection && mode === 'upgrade' && (
+          {inspection && isUpgrade && (
             <Alert
-              type="warning"
-              message="本次新增或扩大的授权"
+              type="info"
+              showIcon
+              message={`检测到「${inspection.manifest.name}」已安装（当前版本 ${currentVersion}），本次导入将执行升级并自动保留历史快照。`}
+              style={{ marginTop: SPACING.md, marginBottom: SPACING.md }}
+            />
+          )}
+          {reviewed && (
+            <PluginAccessReview
+              manifest={reviewed.manifest}
+              preview={reviewed.accessPreview}
+              startCollapsed={needsRiskConfirmation}
+            />
+          )}
+          {inspection && isUpgrade && hasPermissionChanges && (
+            <Alert
+              type="info"
+              message="本次授权变化"
               description={
                 <>
-                  <div>
-                    权限：
-                    {inspection.permissionChanges.permissions?.join('、') ||
-                      '无'}
-                  </div>
-                  <div>
-                    命令：
-                    {inspection.permissionChanges.execAllow?.join('、') || '无'}
-                  </div>
-                  <div>
-                    目录：
-                    {inspection.permissionChanges.fsRoots?.join('、') || '无'}
-                  </div>
-                  <div>
-                    快照仅覆盖托管数据，无法回滚外部数据库、文件或网络副作用。
-                  </div>
+                  {!!permissionChanges?.permissions?.length && (
+                    <div>
+                      <Typography.Text strong>新增权限</Typography.Text>{' '}
+                      {permissionChanges.permissions
+                        ?.map(
+                          (code) =>
+                            inspection.accessPreview.permissions.find(
+                              (item) => item.code === code,
+                            )?.label ?? code,
+                        )
+                        .join('、')}
+                    </div>
+                  )}
+                  {!!permissionChanges?.execAllow?.length && (
+                    <div>
+                      <Typography.Text strong>新增命令</Typography.Text>{' '}
+                      {permissionChanges.execAllow.join('、')}
+                    </div>
+                  )}
+                  {!!permissionChanges?.fsRoots?.length && (
+                    <div>
+                      <Typography.Text strong>新增或扩大的目录</Typography.Text>{' '}
+                      {permissionChanges.fsRoots.join('、')}
+                    </div>
+                  )}
+                  {!!inspection.revokedGrants?.length && (
+                    <div>
+                      需要重新授权或设置的项目 ·{' '}
+                      {inspection.revokedGrants.join('、')}
+                    </div>
+                  )}
                 </>
               }
               style={{ marginBottom: SPACING.lg }}
             />
           )}
-          {mode === 'upgrade' &&
-            (inspection?.manifest.env ?? []).map((env) => (
-              <Form.Item
-                key={env.key}
-                name={['values', env.key]}
-                label={env.label || env.key}
-                extra={
-                  env.secret
-                    ? '秘密不回显；省略保留，显式填写后替换。秘密属性变化必须填写。'
-                    : `现值：${detail?.config[env.key]?.value ?? '未设置'}；新默认值：${env.default || '空'}`
-                }
-                rules={[
-                  {
-                    required:
-                      env.required &&
-                      !detail?.config[env.key]?.value &&
-                      !detail?.config[env.key]?.isSet &&
-                      !env.default,
-                    message: '请填写新增必填配置',
-                  },
-                ]}
-              >
-                {env.secret ? (
-                  <Input.Password autoComplete="new-password" />
-                ) : (
-                  <Input />
-                )}
-              </Form.Item>
-            ))}
+          {inspection && isUpgrade && (
+            <Typography.Text type="secondary">
+              升级快照仅覆盖面板托管的插件包、配置和数据；插件设置项可在升级完成后前往「设置
+              → 配置」修改。
+            </Typography.Text>
+          )}
           {mode === 'uninstall' && (
             <>
               <Alert
@@ -598,100 +657,17 @@ export default function PluginsPage({
               </Form.Item>
             </>
           )}
-          <Button
-            type="primary"
-            danger={mode === 'uninstall'}
-            htmlType="submit"
-            loading={busy}
-            disabled={
-              ((mode === 'install' || mode === 'upgrade') && !inspection) ||
-              (mode === 'enable' && !detail)
-            }
-          >
-            确认
-            {mode === 'enable'
-              ? '启用'
-              : mode === 'uninstall'
-                ? '卸载'
-                : mode === 'upgrade'
-                  ? '升级'
-                  : '安装'}
-          </Button>
         </Form>
       </Modal>
-      <Drawer
-        title={`配置 · ${configPlugin?.name ?? ''}`}
-        open={configOpen}
-        onClose={() => {
-          if (!configBusy) setConfigOpen(false);
-        }}
-        width={LAYOUT.pluginConfigWidth}
-        destroyOnHidden
-      >
-        {renderList && configPlugin && (
-          <div style={{ marginBottom: 16 }}>{pluginControls(configPlugin)}</div>
-        )}
-        {configError && (
-          <Alert
-            type="error"
-            message={configError}
-            style={{ marginBottom: SPACING.lg }}
-          />
-        )}
-        {configBusy && !configDetail ? (
-          <Flex justify="center" style={{ padding: 32 }}>
-            <Spin />
-          </Flex>
-        ) : !configDetail?.manifest.env?.length ? (
-          <Empty description="无配置项" />
-        ) : (
-          <Form
-            key={configDetail.manifest.id}
-            form={configForm}
-            layout="horizontal"
-            labelCol={{ flex: LAYOUT.formLabelWidth }}
-            wrapperCol={{ flex: 1 }}
-            colon={false}
-            initialValues={{
-              values: Object.fromEntries(
-                (configDetail.manifest.env ?? [])
-                  .filter((v) => !v.secret)
-                  .map((v) => [v.key, configDetail.config[v.key]?.value ?? '']),
-              ),
-            }}
-            onFinish={saveConfig}
-          >
-            {configDetail.manifest.env.map((env) => (
-              <div key={env.key}>
-                <Form.Item
-                  name={['values', env.key]}
-                  label={env.label || env.key}
-                  extra={
-                    env.secret
-                      ? `${configDetail.config[env.key]?.isSet ? '已设置' : '未设置'}；留空保持原值`
-                      : undefined
-                  }
-                >
-                  {env.secret ? (
-                    <Input.Password autoComplete="new-password" />
-                  ) : (
-                    <Input />
-                  )}
-                </Form.Item>
-                {env.secret && (
-                  <Form.Item name={['clear', env.key]} valuePropName="checked">
-                    <Checkbox>显式清空此秘密</Checkbox>
-                  </Form.Item>
-                )}
-              </div>
-            ))}
-            <Button type="primary" htmlType="submit" loading={configBusy}>
-              保存配置
-            </Button>
-          </Form>
-        )}
-      </Drawer>
-      {logs && <PluginLogs plugin={logs} close={() => setLogs(undefined)} />}
+      {settingsPlugin && (
+        <PluginSettings
+          key={`${settingsPlugin.id}:${settingsPlugin.version}`}
+          plugin={settingsPlugin}
+          serviceActions={pluginControls(settingsPlugin)}
+          onClose={() => setSettingsPluginId(undefined)}
+          onChanged={refresh}
+        />
+      )}
       <TaskDrawer
         taskId={task?.id ?? null}
         open={!!task}
@@ -702,79 +678,16 @@ export default function PluginsPage({
           if (task?.action === 'install') {
             setInstalled(task.pluginId);
             message.success('已安装，尚未启用');
-          } else message.success('插件任务已完成');
+          } else {
+            if (
+              task?.action === 'uninstall' &&
+              task.pluginId === settingsPluginId
+            )
+              setSettingsPluginId(undefined);
+            message.success('插件任务已完成');
+          }
         }}
       />
     </>
-  );
-}
-function PluginLogs({ plugin, close }: { plugin: Plugin; close: () => void }) {
-  const [content, setContent] = useState('');
-  const [truncated, setTruncated] = useState(false);
-  const [error, setError] = useState('');
-  const [auto, setAuto] = useState(true);
-  const [attempt, setAttempt] = useState(0);
-  useEffect(() => {
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
-    const refresh = async () => {
-      if (document.hidden) {
-        timer = setTimeout(() => void refresh(), 3000);
-        return;
-      }
-      try {
-        const data = await request<{ content: string; truncated: boolean }>(
-          `/api/plugins/${plugin.id}/logs`,
-          { signal: controller.signal, silentError: true },
-        );
-        if (controller.signal.aborted) return;
-        setContent(data.content);
-        setTruncated(data.truncated);
-        setError('');
-        if (auto) timer = setTimeout(() => void refresh(), 3000);
-      } catch (e) {
-        if (!controller.signal.aborted)
-          setError(e instanceof Error ? e.message : '读取失败');
-      }
-    };
-    void refresh();
-    return () => {
-      controller.abort();
-      clearTimeout(timer);
-    };
-  }, [plugin.id, auto, attempt]);
-  return (
-    <Drawer
-      title={`日志 · ${plugin.name}`}
-      open
-      onClose={close}
-      width={LAYOUT.logDrawerWidth}
-    >
-      <Flex gap={SPACING.lg} style={{ marginBottom: SPACING.lg }}>
-        <Button onClick={() => setAttempt((n) => n + 1)}>刷新</Button>
-        <Checkbox checked={auto} onChange={(e) => setAuto(e.target.checked)}>
-          每 3 秒刷新
-        </Checkbox>
-      </Flex>
-      {error && <Alert type="error" message={error} />}
-      {truncated && (
-        <Alert type="info" message="仅显示日志尾部，较早内容已截断" />
-      )}
-      {content ? (
-        <LogText
-          style={{
-            fontFamily: MONO_FONT,
-            maxHeight: '65dvh',
-            overflow: 'auto',
-            whiteSpace: 'pre-wrap',
-            overflowWrap: 'anywhere',
-          }}
-        >
-          {content}
-        </LogText>
-      ) : (
-        <Empty description="暂无进程日志" />
-      )}
-    </Drawer>
   );
 }

@@ -23,18 +23,13 @@ func NewLayout(installDir string) Layout {
 func (c Config) Layout() Layout { return NewLayout(c.InstallDir) }
 
 func (l Layout) Root() string          { return l.root }
-func (l Layout) Binary() string        { return filepath.Join(l.root, "ezpanel") }
 func (l Layout) DataDir() string       { return filepath.Join(l.root, "data") }
 func (l Layout) PluginsDir() string    { return filepath.Join(l.root, "plugins") }
 func (l Layout) PluginDataDir() string { return filepath.Join(l.root, "data", "plugin") }
-func (l Layout) PluginData(id string) string {
-	return filepath.Join(l.root, "data", "plugin", id)
-}
 func (l Layout) AppsDir() string      { return filepath.Join(l.root, "apps") }
 func (l Layout) LogDir() string       { return filepath.Join(l.root, "log") }
 func (l Layout) TempDir() string      { return filepath.Join(l.root, "tmp") }
 func (l Layout) TrashDir() string     { return filepath.Join(l.root, "trash") }
-func (l Layout) SnapshotsDir() string { return filepath.Join(l.root, ".snapshots") }
 
 func normInstance(instance string) string {
 	instance = strings.TrimSpace(instance)
@@ -57,7 +52,6 @@ func (l Layout) OpenRestyDir() string      { return l.AppDir("openresty") }
 func (l Layout) OpenRestyConfig() string   { return filepath.Join(l.OpenRestyDir(), "nginx.conf") }
 func (l Layout) OpenRestyConfDir() string  { return filepath.Join(l.OpenRestyDir(), "conf.d") }
 func (l Layout) OpenRestyLogDir() string   { return l.AppLogDir("openresty") }
-func (l Layout) OpenRestyErrorLog() string { return filepath.Join(l.OpenRestyLogDir(), "error.log") }
 func (l Layout) ACMEDir() string           { return filepath.Join(l.OpenRestyDir(), "acme") }
 
 func (l Layout) WAFDir() string      { return filepath.Join(l.OpenRestyDir(), "ezwaf") }

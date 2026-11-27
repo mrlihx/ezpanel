@@ -30,6 +30,7 @@ export function useRememberedTab(
   section: Section,
   explicit: string | null | undefined,
   tabs: readonly string[],
+  isDynamicTab?: (tab: string) => boolean,
 ) {
   const username = useAuth((state) => state.user?.username);
   const client = useQueryClient();
@@ -55,13 +56,15 @@ export function useRememberedTab(
         [section]: tab,
       })),
   });
-  const requested = explicit && tabs.includes(explicit) ? explicit : undefined;
+  const includesTab = (tab: string) =>
+    tabs.includes(tab) || isDynamicTab?.(tab);
+  const requested = explicit && includesTab(explicit) ? explicit : undefined;
   useEffect(() => {
     if (username && requested && requested !== saved && preferences.isFetched)
       mutate(requested);
   }, [username, requested, saved, preferences.isFetched, mutate]);
   return {
-    tab: requested ?? (saved && tabs.includes(saved) ? saved : tabs[0]),
+    tab: requested ?? (saved && includesTab(saved) ? saved : tabs[0]),
     loading: !requested && preferences.isPending,
   };
 }

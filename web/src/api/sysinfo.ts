@@ -239,6 +239,7 @@ export type MonitorFrame = {
 
 export type PanelStatus = {
   panelVersion: string;
+  currentTag?: string;
   publicIp: string;
   repoUrl: string;
   latestVersion: string;

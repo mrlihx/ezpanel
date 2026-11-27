@@ -26,3 +26,13 @@ func (m *Module) rsyncVisual(c *gin.Context) {
 	}
 	response.OK(c, out)
 }
+
+func (m *Module) rsyncReceiverPassword(c *gin.Context) {
+	password, err := m.packages.RsyncReceiverPassword(c.Request.Context(), c.Param("name"))
+	if err != nil {
+		response.Fail(c, response.Invalid, response.Summary(err.Error()))
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	response.OK(c, gin.H{"password": password})
+}

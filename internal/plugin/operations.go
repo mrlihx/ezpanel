@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"time"
 
@@ -47,7 +48,8 @@ func copyTree(src, dst string) error {
 		return os.Symlink(link, dst)
 	}
 	if info.IsDir() {
-		if e = os.MkdirAll(dst, info.Mode().Perm()); e != nil {
+		// 先用可写权限填充目录，再还原原权限和所有者。
+		if e = os.MkdirAll(dst, 0700); e != nil {
 			return e
 		}
 		entries, e := os.ReadDir(src)
@@ -123,7 +125,7 @@ func (m *Module) snapshot(p store.Plugin, path string) error {
 	}
 	return os.WriteFile(filepath.Join(path, "complete"), []byte("1"), 0600)
 }
-func (m *Module) restore(id, path string) error {
+func (m *Module) restore(id, path string, pending *string) (err error) {
 	if _, e := os.Stat(filepath.Join(path, "complete")); e != nil {
 		return errors.New("快照未完成，禁止替换当前数据")
 	}
@@ -141,27 +143,68 @@ func (m *Module) restore(id, path string) error {
 		return errors.New("快照元数据损坏")
 	}
 	m.stop(id)
-	pkg := filepath.Join(m.packages(), id)
-	data := filepath.Join(m.private(), id)
-	if e = os.RemoveAll(pkg); e != nil {
-		return e
+	// 在目标文件系统准备完整副本，确认两个目录都能复制后再替换。
+	parts := []struct {
+		name, parent, destination string
+		stage, prepared           string
+		parked, replaced          bool
+	}{
+		{name: "package", parent: m.activeUploads(), destination: filepath.Join(m.packages(), id)},
+		{name: "data", parent: m.dataStage(), destination: filepath.Join(m.private(), id)},
 	}
-	if e = copyTree(filepath.Join(path, "package"), pkg); e != nil {
-		return e
-	}
-	if e = os.RemoveAll(data); e != nil {
-		return e
-	}
-	if _, e = os.Lstat(filepath.Join(path, "data")); e == nil {
-		if e = copyTree(filepath.Join(path, "data"), data); e != nil {
+	for i := range parts {
+		part := &parts[i]
+		part.stage = filepath.Join(part.parent, ".restore-"+id)
+		if e = os.RemoveAll(part.stage); e != nil {
 			return e
 		}
-	} else if !os.IsNotExist(e) {
-		return e
+		if e = os.Mkdir(part.stage, 0700); e != nil {
+			return e
+		}
+		defer func() {
+			if err != nil && (part.parked || part.replaced) {
+				var undoErr error
+				if part.replaced {
+					undoErr = os.Rename(part.destination, part.prepared)
+				}
+				if undoErr == nil && part.parked {
+					undoErr = os.Rename(filepath.Join(part.stage, "previous"), part.destination)
+				}
+				if undoErr != nil {
+					err = errors.Join(err, undoErr)
+					return
+				}
+			}
+			_ = os.RemoveAll(part.stage)
+		}()
+		source := filepath.Join(path, part.name)
+		if _, e = os.Lstat(source); part.name == "data" && os.IsNotExist(e) {
+			continue
+		} else if e != nil {
+			return e
+		}
+		part.prepared = filepath.Join(part.stage, part.name)
+		if e = copyTree(source, part.prepared); e != nil {
+			return e
+		}
+	}
+	for i := range parts {
+		part := &parts[i]
+		if e = os.Rename(part.destination, filepath.Join(part.stage, "previous")); e == nil {
+			part.parked = true
+		} else if !os.IsNotExist(e) {
+			return e
+		}
+		if part.prepared != "" {
+			if e = os.Rename(part.prepared, part.destination); e != nil {
+				return e
+			}
+			part.replaced = true
+		}
 	}
 	state.Plugin.Manifest = state.Manifest
 	state.Plugin.Config = state.Config
-	state.Plugin.Operation = nil
+	state.Plugin.Operation = pending
 	return m.db.Transaction(func(tx *gorm.DB) error {
 		if e := tx.Where("plugin_id = ?", id).Delete(&store.PluginKV{}).Error; e != nil {
 			return e
@@ -191,7 +234,7 @@ func (m *Module) recoverOperation(p store.Plugin) error {
 	if op.Phase == "snapshotting" {
 		return m.db.Model(&p).Update("operation", nil).Error
 	}
-	return m.restore(p.ID, op.Snapshot)
+	return m.restore(p.ID, op.Snapshot, nil)
 }
 func (m *Module) upgrade(c *gin.Context) {
 	var in struct {
@@ -231,18 +274,23 @@ func (m *Module) upgrade(c *gin.Context) {
 		for _, oldEnv := range beforeManifest.Env {
 			if nextEnv.Key == oldEnv.Key && nextEnv.Secret != oldEnv.Secret {
 				if _, provided := in.Values[nextEnv.Key]; !provided {
-					os.RemoveAll(dir)
-					response.Fail(c, response.Invalid, "配置秘密属性变化，请显式填写："+nextEnv.Key)
-					return
+					delete(old, nextEnv.Key)
 				}
 			}
 		}
 	}
-	candidate, e := m.candidate(u.Manifest, old, in.Values, true)
+	candidate, e := m.candidate(u.Manifest, old, in.Values, false)
 	if e != nil {
 		os.RemoveAll(dir)
 		response.Fail(c, response.Invalid, e.Error())
 		return
+	}
+	missingRequired := false
+	for _, v := range u.Manifest.Env {
+		if v.Required && candidate[v.Key] == "" {
+			missingRequired = true
+			break
+		}
 	}
 	session := auth.Current(c)
 	id, e := m.tasks.Submit(task.Meta{Module: "plugins", Action: "upgrade", Target: p.ID, ResourceID: p.ID, LockKey: "plugin:" + p.ID, Username: session.User.Username, IP: m.auth.ClientIP(c)}, func(ctx context.Context, log *task.Log) (any, error) {
@@ -254,11 +302,39 @@ func (m *Module) upgrade(c *gin.Context) {
 		if current.Version != p.Version || current.Config != p.Config {
 			return nil, errors.New("插件配置已变化，请重新检查升级")
 		}
+		if current.Operation != nil {
+			return nil, errors.New("插件存在未恢复的操作记录")
+		}
 		p = current
-		backup := filepath.Join(m.packages(), ".backup", p.ID)
-		if e := os.RemoveAll(backup); e != nil {
+		revoked, err := m.grantPreview(p.ID, beforeManifest, u.Manifest)
+		if err != nil {
+			return nil, err
+		}
+		if !slices.Equal(revoked, u.RevokedGrants) {
+			return nil, errors.New("插件授权已变化，请重新检查升级")
+		}
+		if err := m.checkDependencies(u.Manifest, p.Enabled); err != nil {
+			return nil, err
+		}
+		if beforeManifest.BackupProvider != nil && u.Manifest.BackupProvider == nil {
+			if err := m.services.Backups.PluginStorageInUse(p.ID); err != nil {
+				return nil, err
+			}
+		}
+		if beforeManifest.NotificationProvider != nil && u.Manifest.NotificationProvider == nil {
+			if err := m.services.Alerts.PluginProviderInUse(p.ID); err != nil {
+				return nil, err
+			}
+		}
+		if beforeManifest.DNSProvider != nil && u.Manifest.DNSProvider == nil {
+			if err := m.services.Certificates.DNSProviderInUse(p.ID); err != nil {
+				return nil, err
+			}
+		}
+		if e := m.checkSnapshotSpace(p.ID); e != nil {
 			return nil, e
 		}
+		backup := filepath.Join(m.historyDir(p.ID), log.ID())
 		op := operation{Kind: "upgrade", TaskID: log.ID(), Phase: "snapshotting", Snapshot: backup}
 		if e := m.record(&p, op); e != nil {
 			return nil, e
@@ -266,6 +342,9 @@ func (m *Module) upgrade(c *gin.Context) {
 		m.stop(p.ID)
 		abortBeforeReplace := func(cause error) (any, error) {
 			clearErr := m.db.Model(&p).Update("operation", nil).Error
+			if clearErr == nil {
+				m.pruneHistory(p.ID)
+			}
 			if p.Enabled {
 				if startErr := m.start(p); startErr != nil {
 					m.setStatus(p.ID, "failed")
@@ -281,53 +360,74 @@ func (m *Module) upgrade(c *gin.Context) {
 		if e := m.record(&p, op); e != nil {
 			return abortBeforeReplace(errors.Join(errors.New("无法记录插件升级阶段"), e))
 		}
-		rollback := func(cause string) (any, error) {
+		rollback := func(message string, cause error) (any, error) {
 			m.stop(p.ID)
-			if e := m.restore(p.ID, backup); e != nil {
+			if e := m.restore(p.ID, backup, nil); e != nil {
 				m.setStatus(p.ID, "failed")
-				return nil, errors.New(cause + "；完整快照恢复失败，保留操作记录等待人工处理")
+				return nil, errors.Join(errors.New(message+"；完整快照恢复失败，已保留操作记录"), cause, e)
 			}
+			m.pruneHistory(p.ID)
 			if p.Enabled {
 				if e := m.start(p); e != nil {
 					m.setStatus(p.ID, "failed")
-					return nil, errors.New(cause + "；旧包已恢复但旧进程恢复失败")
+					return nil, errors.Join(errors.New(message+"；旧包已恢复，旧进程启动失败"), cause, e)
 				}
 			}
-			return nil, errors.New(cause + "；已恢复完整旧快照")
+			return nil, errors.Join(errors.New(message+"；已恢复完整旧快照"), cause)
 		}
 		for _, entry := range u.Manifest.Entry {
 			if e := os.Chmod(filepath.Join(dir, "contents", entry), 0755); e != nil {
-				return rollback("新版入口准备失败")
+				return rollback("新版入口准备失败", e)
 			}
 		}
 		pkg := filepath.Join(m.packages(), p.ID)
 		if e := os.RemoveAll(pkg); e != nil {
-			return rollback("旧包移除失败")
+			return rollback("旧包移除失败", e)
 		}
 		if e := os.Rename(filepath.Join(dir, "contents"), pkg); e != nil {
-			return rollback("新版包替换失败")
+			return rollback("新版包替换失败", e)
 		}
 		next := p
 		next.Version = u.Manifest.Version
 		next.Name = u.Manifest.Name
 		next.Type = u.Manifest.Type
+		if missingRequired {
+			next.Enabled = false
+		}
 		manifest, _ := json.Marshal(publicManifest(u.Manifest))
 		cfg, _ := json.Marshal(candidate)
 		next.Manifest = string(manifest)
 		next.Config = string(cfg)
 		next.UpdatedAt = time.Now().UTC()
 		if e := m.db.Save(&next).Error; e != nil {
-			return rollback("候选配置保存失败")
+			return rollback("候选配置保存失败", e)
 		}
-		if p.Enabled {
+		if next.Enabled {
 			if e := m.start(next); e != nil {
-				return rollback("新版启动失败")
+				return rollback("新版启动失败", e)
 			}
+		} else if missingRequired {
+			m.setStatus(p.ID, "disabled")
 		}
-		if e := m.db.Model(&next).Update("operation", nil).Error; e != nil {
-			return rollback("升级提交失败")
+		if e := m.db.Transaction(func(tx *gorm.DB) error {
+			if err := m.reconcileGrants(tx, p.ID, beforeManifest, u.Manifest); err != nil {
+				return err
+			}
+			if err := tx.Exec("INSERT INTO plugin_history (plugin_id, snapshot) VALUES (?, ?) ON CONFLICT (plugin_id) DO UPDATE SET snapshot=excluded.snapshot", p.ID, log.ID()).Error; err != nil {
+				return err
+			}
+			return tx.Model(&next).Update("operation", nil).Error
+		}); e != nil {
+			return rollback("升级提交失败", e)
 		}
-		log.Line("插件升级已提交；仅托管快照可回滚，外部业务副作用不在恢复范围")
+		m.restoreSchedules(next)
+		m.pruneHistory(p.ID)
+		m.notifyStartup()
+		if missingRequired {
+			log.Line("插件升级已提交；因新增必填配置项尚未填写，插件已暂停，请在设置窗口完善配置后启动")
+		} else {
+			log.Line("插件升级已提交；仅托管快照可回滚，外部业务副作用不在恢复范围")
+		}
 		return gin.H{"pluginId": p.ID, "version": next.Version}, nil
 	})
 	if e != nil {
@@ -346,17 +446,40 @@ func (m *Module) remove(p store.Plugin, purge bool) error {
 	if e := os.RemoveAll(filepath.Join(m.packages(), ".backup", p.ID)); e != nil {
 		return errors.New("插件快照删除失败，仍有残留")
 	}
+	if e := os.RemoveAll(filepath.Join(m.packages(), ".backup", ".rollback", p.ID)); e != nil {
+		return errors.New("插件恢复快照删除失败，仍有残留")
+	}
+	if e := os.RemoveAll(m.historyDir(p.ID)); e != nil {
+		return errors.New("插件历史快照删除失败，仍有残留")
+	}
 	if purge {
 		if e := os.RemoveAll(filepath.Join(m.private(), p.ID)); e != nil {
 			return errors.New("插件私有数据删除失败，仍有残留")
 		}
+		for _, suffix := range []string{"", ".1", ".2"} {
+			if err := os.Remove(m.logPath(p.ID) + suffix); err != nil && !os.IsNotExist(err) {
+				return errors.New("插件日志删除失败")
+			}
+		}
 	}
-	return m.db.Transaction(func(tx *gorm.DB) error {
+	err := m.db.Transaction(func(tx *gorm.DB) error {
+		if e := tx.Delete(&store.Setting{}, "key = ?", grantPrefix+p.ID).Error; e != nil {
+			return e
+		}
 		if e := tx.Where("plugin_id = ?", p.ID).Delete(&store.PluginKV{}).Error; e != nil {
 			return e
 		}
+		if purge {
+			if e := tx.Exec("DELETE FROM plugin_sandbox_users WHERE plugin_id = ?", p.ID).Error; e != nil {
+				return e
+			}
+		}
 		return tx.Delete(&p).Error
 	})
+	if err == nil {
+		m.replaceSchedules(p.ID, Manifest{}, capabilityGrant{})
+	}
+	return err
 }
 func (m *Module) uninstall(c *gin.Context) {
 	var in struct {
@@ -371,6 +494,18 @@ func (m *Module) uninstall(c *gin.Context) {
 	}
 	s := auth.Current(c)
 	id, e := m.tasks.Submit(task.Meta{Module: "plugins", Action: "uninstall", Target: p.ID, ResourceID: p.ID, LockKey: "plugin:" + p.ID, Username: s.User.Username, IP: m.auth.ClientIP(c)}, func(ctx context.Context, log *task.Log) (any, error) {
+		if err := m.checkDependents(p.ID, ""); err != nil {
+			return nil, err
+		}
+		if err := m.services.Backups.PluginStorageInUse(p.ID); err != nil {
+			return nil, err
+		}
+		if err := m.services.Alerts.PluginProviderInUse(p.ID); err != nil {
+			return nil, err
+		}
+		if err := m.services.Certificates.DNSProviderInUse(p.ID); err != nil {
+			return nil, err
+		}
 		if e := m.record(&p, operation{Kind: "uninstall", TaskID: log.ID(), Phase: "removing", Purge: in.PurgeData}); e != nil {
 			return nil, e
 		}

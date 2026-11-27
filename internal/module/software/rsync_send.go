@@ -36,13 +36,17 @@ var rsyncModulePath = regexp.MustCompile(`^/[a-zA-Z0-9_][a-zA-Z0-9_.-]*(/[a-zA-Z
 var rsyncUser = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63}$`)
 
 type rsyncSender struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Source      string `json:"source"`
-	Destination string `json:"destination"`
-	Username    string `json:"username"`
-	Password    string `json:"password,omitempty"`
-	RuleID      string `json:"ruleId"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Source       string `json:"source"`
+	Destination  string `json:"destination"`
+	Username     string `json:"username"`
+	Password     string `json:"password,omitempty"`
+	RuleID       string `json:"ruleId"`
+	Mode         string `json:"mode"`
+	BandwidthKB  int    `json:"bandwidthKb"`
+	Schedule     string `json:"schedule"`
+	CheckMinutes int    `json:"checkMinutes"`
 }
 
 type rsyncRule struct {
@@ -68,7 +72,22 @@ func (m *Module) readRsyncWorkspace(ctx context.Context) (rsyncWorkspace, error)
 	if err != nil {
 		return out, err
 	}
-	return out, json.Unmarshal([]byte(row.Value), &out)
+	if err := json.Unmarshal([]byte(row.Value), &out); err != nil {
+		return out, err
+	}
+	for i := range out.Senders {
+		normalizeRsyncSender(&out.Senders[i])
+	}
+	return out, nil
+}
+
+func normalizeRsyncSender(row *rsyncSender) {
+	if row.Mode == "" {
+		row.Mode = "incremental"
+	}
+	if row.Schedule == "" {
+		row.Schedule = "interval"
+	}
 }
 
 func (m *Module) rsyncWorkspace(c *gin.Context) {
@@ -100,6 +119,10 @@ func (m *Module) rsyncWorkspace(c *gin.Context) {
 			return
 		}
 		current = in
+		select {
+		case m.rsyncChanged <- struct{}{}:
+		default:
+		}
 	}
 	current.Secrets = nil
 	response.OK(c, current)
@@ -139,6 +162,11 @@ func (m *Module) prepareRsyncWorkspace(in *rsyncWorkspace, old rsyncWorkspace) e
 	key := m.cfg.Current().AESKey
 	for i := range in.Senders {
 		row := &in.Senders[i]
+		normalizeRsyncSender(row)
+		if (row.Mode != "incremental" && row.Mode != "full") || row.BandwidthKB < 0 ||
+			(row.Schedule != "realtime" && row.Schedule != "interval") || row.CheckMinutes < 0 || row.CheckMinutes > int((time.Duration(1<<63-1))/time.Minute) {
+			return errors.New("同步方式、限速或同步周期无效")
+		}
 		row.Name = strings.TrimSpace(row.Name)
 		if row.ID == "" {
 			row.ID = store.ID()
@@ -154,9 +182,11 @@ func (m *Module) prepareRsyncWorkspace(in *rsyncWorkspace, old rsyncWorkspace) e
 		previous := slices.IndexFunc(old.Senders, func(item rsyncSender) bool { return item.ID == row.ID })
 		sameRemote := previous >= 0 && old.Senders[previous].Username == row.Username && old.Senders[previous].Destination == row.Destination
 		if !sameRemote || old.Senders[previous].Source != row.Source {
-			if _, _, err := m.rsyncSendPaths(*row); err != nil {
+			source, _, err := m.rsyncSendPaths(*row)
+			if err != nil {
 				return fmt.Errorf("%s：%w", row.Name, err)
 			}
+			row.Source = strings.TrimSuffix(source, "/")
 		}
 		if len(row.Password) > 256 || strings.IndexFunc(row.Password, unicode.IsControl) >= 0 {
 			return errors.New("发送任务密码格式无效")
@@ -170,6 +200,8 @@ func (m *Module) prepareRsyncWorkspace(in *rsyncWorkspace, old rsyncWorkspace) e
 				in.Secrets[row.ID] = secret
 			} else if sameRemote && old.Secrets[row.ID] != "" {
 				in.Secrets[row.ID] = old.Secrets[row.ID]
+			} else {
+				return errors.New("请填写接收端密码，地址或用户名变化后需重新填写")
 			}
 		}
 		row.Password = ""
@@ -256,40 +288,75 @@ func (m *Module) runRsyncSender(c *gin.Context) {
 		return
 	}
 	row := workspace.Senders[index]
-	state, err := m.packages.Status(ctx, "rsync")
-	if err != nil || !state.Manageable {
-		fail(c, pkgmgr.ErrUnsupported)
-		return
-	}
-	bin, err := m.packages.LookPath("rsync")
+	session := auth.Current(c)
+	id, err := m.submitRsyncSender(ctx, workspace, row, session.User.Username, m.auth.ClientIP(c), "手动同步", nil)
 	if err != nil {
-		fail(c, err)
+		response.Fail(c, response.Invalid, response.Summary(err.Error()))
 		return
 	}
-	source, destination, err := m.rsyncSendPaths(row)
-	if err != nil {
-		response.Fail(c, response.Invalid, err.Error())
-		return
-	}
+	c.Set("panel.taskSubmitted", true)
+	response.OK(c, gin.H{"taskId": id})
+}
+
+func rsyncSendArgs(row rsyncSender, workspace rsyncWorkspace, remote bool) []string {
 	args := []string{"--recursive", "--links", "--safe-links", "--times", "--itemize-changes", "--stats", "--timeout=120"}
-	if strings.HasPrefix(destination, "rsync://") {
+	if remote {
 		args = append(args, "--contimeout=15")
+	}
+	if row.Mode == "full" {
+		args = append(args, "--delete-delay")
+	}
+	if row.BandwidthKB > 0 {
+		args = append(args, "--bwlimit="+strconv.Itoa(row.BandwidthKB))
 	}
 	if i := slices.IndexFunc(workspace.Rules, func(rule rsyncRule) bool { return rule.ID == row.RuleID }); i >= 0 {
 		for pattern := range strings.SplitSeq(workspace.Rules[i].Patterns, "\n") {
 			args = append(args, "--exclude="+pattern)
 		}
 	}
-	session := auth.Current(c)
-	id, err := m.tasks.Submit(task.Meta{
+	return args
+}
+
+func (m *Module) submitRsyncSender(ctx context.Context, workspace rsyncWorkspace, row rsyncSender, username, ip, trigger string, completed chan<- error) (string, error) {
+	state, err := m.packages.Status(ctx, "rsync")
+	if err != nil || !state.Manageable {
+		return "", pkgmgr.ErrUnsupported
+	}
+	bin, err := m.packages.LookPath("rsync")
+	if err != nil {
+		return "", err
+	}
+	source, destination, err := m.rsyncSendPaths(row)
+	if err != nil {
+		return "", err
+	}
+	args := rsyncSendArgs(row, workspace, strings.HasPrefix(destination, "rsync://"))
+	watchCtx := ctx
+	return m.tasks.Submit(task.Meta{
 		Module: "software", Action: "rsync-send", Target: row.Name, ResourceID: "rsync",
-		LockKey: "software-install:rsync", Username: session.User.Username, IP: m.auth.ClientIP(c),
-	}, func(ctx context.Context, log *task.Log) (any, error) {
+		LockKey: "software-install:rsync", Username: username, IP: ip,
+	}, func(ctx context.Context, log *task.Log) (result any, runErr error) {
+		if completed != nil {
+			transferCtx, cancel := context.WithCancel(ctx)
+			stop := context.AfterFunc(watchCtx, cancel)
+			defer stop()
+			defer cancel()
+			ctx = transferCtx
+		}
+		defer func() {
+			if completed != nil {
+				select {
+				case completed <- runErr:
+				default:
+				}
+			}
+		}()
 		if secret := workspace.Secrets[row.ID]; secret != "" && strings.HasPrefix(destination, "rsync://") {
 			password, err := store.Decrypt(m.cfg.Current().AESKey, secret)
 			if err != nil {
 				return nil, errors.New("无法读取发送任务密码")
 			}
+			log.Secrets(password)
 			file, err := os.CreateTemp(m.cfg.DataDir(), ".rsync-password-")
 			if err != nil {
 				return nil, err
@@ -301,15 +368,13 @@ func (m *Module) runRsyncSender(c *gin.Context) {
 			}
 			args = append(args, "--password-file="+file.Name())
 		}
-		log.Line("源目录 " + source)
+		log.Line(trigger)
+		log.Line("数据源目录 " + source)
 		log.Line("目标 " + destination)
-		_, err := m.packages.Stream(ctx, time.Hour, nil, log.Line, bin, append(args, "--", source, destination)...)
+		if row.Mode == "full" {
+			log.Line("完全同步，清理目标端多余文件")
+		}
+		_, err := m.packages.Stream(ctx, 7*24*time.Hour, nil, log.Line, bin, append(args, "--", source, destination)...)
 		return nil, err
 	})
-	if err != nil {
-		fail(c, err)
-		return
-	}
-	c.Set("panel.taskSubmitted", true)
-	response.OK(c, gin.H{"taskId": id})
 }

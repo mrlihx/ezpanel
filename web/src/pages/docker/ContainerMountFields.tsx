@@ -1,26 +1,17 @@
-import {
-  Button,
-  Checkbox,
-  Flex,
-  Form,
-  Input,
-  Select,
-  Space,
-  Typography,
-} from 'antd';
+import './docker-operation-form.css';
+import { Button, Checkbox, Form, Input, Select, Flex } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
 
 export default function ContainerMountFields() {
   return (
     <Form.List name="mounts">
       {(fields, { add, remove }) => (
-        <Space direction="vertical" style={{ width: '100%', marginBlock: 16 }}>
-          <Typography.Text>存储挂载</Typography.Text>
+        <Flex vertical align="start" gap={8}>
           {fields.map(({ key, name, ...rest }) => (
-            <Flex key={key} gap={8} wrap>
+            <div key={key} className="docker-create-mount">
               <Form.Item {...rest} name={[name, 'type']}>
                 <Select
-                  style={{ width: 100 }}
+                  aria-label="挂载类型"
                   options={[
                     { value: 'bind', label: '主机目录' },
                     { value: 'volume', label: '存储卷' },
@@ -53,12 +44,12 @@ export default function ContainerMountFields() {
                 icon={<DeleteOutlined />}
                 onClick={() => remove(name)}
               />
-            </Flex>
+            </div>
           ))}
           <Button onClick={() => add({ type: 'bind', readOnly: false })}>
             添加挂载
           </Button>
-        </Space>
+        </Flex>
       )}
     </Form.List>
   );

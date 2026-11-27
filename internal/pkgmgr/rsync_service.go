@@ -11,8 +11,9 @@ import (
 )
 
 const rsyncConfig = "/etc/rsyncd.conf"
+
 func (m *Manager) rsyncDefaultConfig() string {
-	return "address = 127.0.0.1\nport = 873\nlog file = " + m.layout().RsyncLog() + "\n"
+	return "address = 0.0.0.0\nport = 873\nlog file = " + m.layout().RsyncLog() + "\n"
 }
 
 func (m *Manager) prepareRsync() error {

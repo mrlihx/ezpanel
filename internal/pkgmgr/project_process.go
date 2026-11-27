@@ -48,7 +48,10 @@ func (m *Manager) ProjectLoad(ctx context.Context, id string, pid int32, port in
 	ConnectionError string                `json:"connectionError,omitempty"`
 	OpenFiles       []ProjectOpenFile     `json:"openFiles"`
 }, err error) {
-	name := "ezpanel-site-" + id
+	name, err := m.projectContainerName(ctx, id)
+	if err != nil {
+		return data, err
+	}
 	info, exists, err := m.inspectContainer(ctx, name)
 	if err != nil || !exists || !info.State.Running {
 		return data, err

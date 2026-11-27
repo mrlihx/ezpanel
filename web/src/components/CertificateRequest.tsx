@@ -7,8 +7,8 @@ import {
   Descriptions,
   Flex,
   Form,
-  Input,
   Modal,
+  Popconfirm,
   Select,
   Radio,
   Space,
@@ -18,6 +18,7 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import ContentSizedTable from './ContentSizedTable';
 import {
+  cancelCertificateOrder,
   certificateOrder,
   certificateOrders,
   completeCertificateOrder,
@@ -28,6 +29,7 @@ import {
   type CertificateOrder,
 } from '../api/certificate';
 import { websites, type Website } from '../api/website';
+import { usePluginList } from '../api/plugin';
 import { LAYOUT, SPACING } from '../styles/tokens';
 import { formatTime } from '../utils/format';
 import TaskDrawer from './TaskDrawer';
@@ -38,23 +40,28 @@ const orderStates = {
   issuing: { label: '正在签发', color: 'processing' },
   valid: { label: '已签发', color: 'success' },
   failed: { label: '失败', color: 'error' },
+  cancelled: { label: '已取消', color: 'default' },
 };
 type Values = {
-  email: string;
   domains: string[];
   algorithm: CertificateAlgorithm;
   method: 'http-01' | 'dns-01';
+  dnsProvider?: string;
   siteId?: string;
   acceptTerms: boolean;
 };
+const inheritDNSProvider = '__inherit__';
+
 export default function CertificateRequest({
   defaultDomains,
   siteId,
+  autoTempSite,
   renewal,
   onDeploy,
 }: {
   defaultDomains?: string[];
   siteId?: string;
+  autoTempSite?: boolean;
   renewal?: Certificate;
   onDeploy: (id: string) => Promise<void | false>;
 }) {
@@ -80,6 +87,12 @@ export default function CertificateRequest({
     queryKey: ['certificate-orders', siteId],
     queryFn: () => certificateOrders(siteId),
   });
+  const plugins = usePluginList();
+  const dnsProviders = (plugins.data ?? []).flatMap((plugin) =>
+    plugin.runtimeStatus === 'running' && plugin.dnsProvider
+      ? [{ value: plugin.id, label: plugin.dnsProvider.title }]
+      : [],
+  );
   const detail = useQuery({
     queryKey: ['certificate-order', orderId],
     queryFn: () => certificateOrder(orderId!),
@@ -96,7 +109,7 @@ export default function CertificateRequest({
         if ((page - 1) * 100 >= result.total) return list;
       }
     },
-    enabled: !siteId && method === 'http-01',
+    enabled: !siteId && !autoTempSite && method === 'http-01',
   });
   const requestedDomains = domains
     .map((value: string) => value.trim().toLowerCase())
@@ -138,10 +151,19 @@ export default function CertificateRequest({
       const result = await createCertificateOrder({
         domains: values.domains.map((value) => value.trim()).filter(Boolean),
         algorithm: values.algorithm,
-        email: values.email.trim(),
+        email: '',
         method: values.method,
+        dnsProvider:
+          values.method === 'dns-01' &&
+          values.dnsProvider !== inheritDNSProvider
+            ? values.dnsProvider
+            : undefined,
+        inheritDNSProvider:
+          values.method === 'dns-01' &&
+          values.dnsProvider === inheritDNSProvider,
         siteId:
-          siteId || (values.method === 'http-01' ? values.siteId : undefined),
+          siteId ||
+          (!autoTempSite && values.method === 'http-01' ? values.siteId : ''),
         renewalId: renewal?.id,
         acceptTerms: true,
       });
@@ -180,8 +202,8 @@ export default function CertificateRequest({
           ),
         ],
         algorithm: renewal?.algorithm ?? 'rsa2048',
-        email: renewal?.email ?? '',
         method: renewal?.validationMethod || 'http-01',
+        dnsProvider: renewal ? inheritDNSProvider : undefined,
         acceptTerms: false,
       }}
       onFinish={(values) => void submit(values)}
@@ -204,10 +226,26 @@ export default function CertificateRequest({
         <Radio.Group
           options={[
             { value: 'http-01', label: 'HTTP 文件验证' },
-            { value: 'dns-01', label: '手动 DNS 验证' },
+            { value: 'dns-01', label: 'DNS 验证' },
           ]}
         />
       </Form.Item>
+      {method === 'dns-01' && (renewal || dnsProviders.length > 0) && (
+        <Form.Item label="DNS 渠道" name="dnsProvider">
+          <Select
+            allowClear
+            options={
+              renewal
+                ? [
+                    { value: inheritDNSProvider, label: '沿用原验证渠道' },
+                    ...dnsProviders,
+                  ]
+                : dnsProviders
+            }
+            placeholder="留空时手动添加 TXT 记录"
+          />
+        </Form.Item>
+      )}
       <Form.Item label="申请域名" required>
         {domainOptions.length > 0 && (
           <Checkbox
@@ -256,17 +294,7 @@ export default function CertificateRequest({
           )}
         </Form.Item>
       </Form.Item>
-      <Form.Item
-        label="联系邮箱"
-        name="email"
-        rules={[
-          { required: true, message: '请输入邮箱' },
-          { type: 'email', message: '邮箱格式不正确' },
-        ]}
-      >
-        <Input autoComplete="email" />
-      </Form.Item>
-      {!siteId && method === 'http-01' && (
+      {!siteId && !autoTempSite && method === 'http-01' && (
         <Form.Item
           label="验证网站"
           name="siteId"
@@ -295,7 +323,7 @@ export default function CertificateRequest({
           />
         </Form.Item>
       )}
-      {sites.isError && !siteId && method === 'http-01' && (
+      {sites.isError && !siteId && !autoTempSite && method === 'http-01' && (
         <Alert
           type="error"
           message={sites.error.message}
@@ -621,6 +649,24 @@ export default function CertificateRequest({
                   >
                     已添加 TXT，继续验证
                   </Button>
+                  <Popconfirm
+                    title="取消这条等待验证的申请？"
+                    description="面板将保留取消记录，你可以重新发起申请。"
+                    onConfirm={() =>
+                      run('cancel', async () => {
+                        await cancelCertificateOrder(activeOrder.id);
+                        await refresh();
+                      })
+                    }
+                  >
+                    <Button
+                      danger
+                      loading={busy === 'cancel'}
+                      disabled={!!busy}
+                    >
+                      取消申请
+                    </Button>
+                  </Popconfirm>
                 </>
               )}
             {activeOrder.status === 'valid' && (

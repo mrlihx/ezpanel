@@ -8,26 +8,16 @@ import {
   Input,
   InputNumber,
   Modal,
-  Select,
   Space,
   Switch,
   Tag,
 } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { request } from '../../api/client';
-import { rsyncWorkspaceQuery } from '../../api/rsync';
+import type { RsyncReceiver as Receiver } from '../../api/rsync';
+import RsyncReceiverEditor from './RsyncReceiverEditor';
 import ContentSizedTable from '../../components/ContentSizedTable';
-import HostToolDirectory from './HostToolDirectory';
 
-type Receiver = {
-  name: string;
-  path: string;
-  username: string;
-  password?: string;
-  enabled: boolean;
-  readOnly: boolean;
-  exclude: string;
-};
 type Settings = {
   revision: string;
   address: string;
@@ -57,11 +47,9 @@ export default function RsyncVisual({
     queryKey,
     queryFn: () => request<Settings>(endpoint),
   });
-  const workspace = useQuery(rsyncWorkspaceQuery);
   const [globalOpen, setGlobalOpen] = useState(false);
-  const [receiver, setReceiver] = useState<Partial<Receiver>>();
+  const [receiver, setReceiver] = useState<Receiver>();
   const [globalForm] = Form.useForm<Settings>();
-  const [receiverForm] = Form.useForm<Receiver>();
   const save = useMutation({
     mutationFn: (data: Settings) =>
       request<Settings>(endpoint, { method: 'PUT', data }),
@@ -69,7 +57,7 @@ export default function RsyncVisual({
       client.setQueryData(queryKey, next);
       setGlobalOpen(false);
       setReceiver(undefined);
-      message.success('Rsync 配置已保存，端口或监听地址修改后请重启服务');
+      message.success('Rsync 配置已保存');
     },
   });
   const data = config.data;
@@ -81,12 +69,30 @@ export default function RsyncVisual({
       <Space wrap>
         <Button
           type="primary"
-          onClick={() => setReceiver({ enabled: true, readOnly: false })}
+          onClick={() =>
+            setReceiver({
+              name: '',
+              enabled: true,
+              path: '/www/wwwroot',
+              allow: '',
+              username:
+                'sync_' +
+                Array.from(crypto.getRandomValues(new Uint8Array(6)), (byte) =>
+                  byte.toString(16).padStart(2, '0'),
+                ).join(''),
+              password: Array.from(
+                crypto.getRandomValues(new Uint8Array(18)),
+                (byte) => byte.toString(16).padStart(2, '0'),
+              ).join(''),
+            })
+          }
         >
           创建接收任务
         </Button>
         <Button onClick={() => setGlobalOpen(true)}>全局配置</Button>
-        <Tag>TCP {data.port}</Tag>
+        <Tag>
+          {data.address || '0.0.0.0'}:{data.port}
+        </Tag>
         <Space>
           <span>接收服务</span>
           <Switch
@@ -104,12 +110,12 @@ export default function RsyncVisual({
         pagination={false}
         scroll={{ x: 'max-content' }}
         columns={[
-          { title: '模块名称', dataIndex: 'name' },
           { title: '用户名', dataIndex: 'username' },
           { title: '接收目录', dataIndex: 'path' },
           {
-            title: '访问权限',
-            render: (_, row) => (row.readOnly ? '只读' : '仅接收'),
+            title: 'IP 白名单',
+            dataIndex: 'allow',
+            render: (value: string) => value || '沿用全局配置',
           },
           {
             title: '接收开关',
@@ -146,7 +152,7 @@ export default function RsyncVisual({
                   danger
                   onClick={() =>
                     modal.confirm({
-                      title: `删除接收任务 ${row.name}？`,
+                      title: `删除接收任务 ${row.username}？`,
                       onOk: () =>
                         save.mutateAsync({
                           ...data,
@@ -186,7 +192,7 @@ export default function RsyncVisual({
             name="port"
             label="监听端口"
             rules={[{ required: true }]}
-            extra="远程连接需要放行监听端口。"
+            extra="远程连接需要放行监听端口，修改监听地址或端口后运行中的服务会自动重启。"
           >
             <InputNumber min={1} max={65535} precision={0} />
           </Form.Item>
@@ -216,81 +222,24 @@ export default function RsyncVisual({
           </Form.Item>
         </ApplicationSettingsForm>
       </Modal>
-      <Modal
-        title={receiver?.name ? '编辑接收任务' : '创建接收任务'}
-        open={!!receiver}
-        destroyOnHidden
-        onCancel={() => setReceiver(undefined)}
-        onOk={() => receiverForm.submit()}
-        confirmLoading={save.isPending}
-      >
-        <ApplicationSettingsForm
-          form={receiverForm}
-
-          preserve={false}
-          initialValues={receiver}
-          onFinish={(row) =>
-            save.mutate({
+      {receiver && (
+        <RsyncReceiverEditor
+          key={receiver.name || 'new'}
+          receiver={receiver}
+          saving={save.isPending}
+          onClose={() => setReceiver(undefined)}
+          onSave={(row) =>
+            save.mutateAsync({
               ...data,
-              receivers: receiver?.name
+              receivers: receiver.name
                 ? data.receivers.map((item) =>
-                    item.name === row.name ? row : item,
+                    item.name === receiver.name ? row : item,
                   )
                 : [...data.receivers, row],
             })
           }
-        >
-          <Form.Item name="name" label="模块名称" rules={[{ required: true }]}>
-            <Input disabled={!!receiver?.name} />
-          </Form.Item>
-          <Form.Item name="path" label="接收目录" rules={[{ required: true }]}>
-            <HostToolDirectory />
-          </Form.Item>
-          <Form.Item
-            name="username"
-            label="用户名"
-            rules={[{ required: true }]}
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item
-            name="password"
-            label="密码"
-            rules={[{ required: !receiver?.name }]}
-          >
-            <Input.Password
-              placeholder={receiver?.name ? '留空保留原密码' : '输入认证密码'}
-            />
-          </Form.Item>
-          {!!workspace.data?.rules.length && (
-            <Form.Item label="填入排除规则">
-              <Select
-                placeholder="从已保存的规则填入"
-                options={workspace.data.rules.map((rule) => ({
-                  value: rule.id,
-                  label: rule.name,
-                }))}
-                onChange={(id) =>
-                  receiverForm.setFieldValue(
-                    'exclude',
-                    workspace.data.rules.find((rule) => rule.id === id)
-                      ?.patterns ?? '',
-                  )
-                }
-              />
-            </Form.Item>
-          )}
-          <Form.Item name="exclude" label="排除规则">
-            <Input.TextArea rows={3} placeholder="每行一个匹配规则" />
-          </Form.Item>
-          <Form.Item name="enabled" label="启用接收" valuePropName="checked">
-            <Switch />
-          </Form.Item>
-          <Form.Item name="readOnly" label="只读" valuePropName="checked">
-            <Switch />
-          </Form.Item>
-        </ApplicationSettingsForm>
-      </Modal>
+        />
+      )}
     </Space>
   );
 }

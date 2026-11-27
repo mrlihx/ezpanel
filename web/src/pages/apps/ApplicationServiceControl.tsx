@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { App, Button, Input, Modal, Popover, Space, theme } from 'antd';
 import { Pause, Play } from 'lucide-react';
 import {
@@ -24,7 +23,6 @@ export default function ApplicationServiceControl({
 }) {
   const { message, modal } = App.useApp();
   const { token } = theme.useToken();
-  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [hover, setHover] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -124,10 +122,6 @@ export default function ApplicationServiceControl({
           busy={busy}
           control={serviceAction}
           onClose={() => setOpen(false)}
-          switchVersion={() => {
-            setOpen(false);
-            navigate(`/apps?settings=${encodeURIComponent(app.id)}`);
-          }}
           uninstall={
             onUninstall ??
             (() => {

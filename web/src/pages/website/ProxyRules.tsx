@@ -3,8 +3,6 @@ import {
   App,
   Badge,
   Button,
-  Collapse,
-  Flex,
   Form,
   Input,
   InputNumber,
@@ -13,8 +11,13 @@ import {
   Space,
   Switch,
 } from 'antd';
-import { useState } from 'react';
-import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
+import { useId, useState } from 'react';
+import {
+  DownOutlined,
+  MinusCircleOutlined,
+  PlusOutlined,
+  RightOutlined,
+} from '@ant-design/icons';
 import type { ProxyRoute } from '../../api/website';
 import ContentSizedTable from '../../components/ContentSizedTable';
 import { LAYOUT, SPACING } from '../../styles/tokens';
@@ -41,6 +44,8 @@ export default function ProxyRules({
   const { modal } = App.useApp();
   const [form] = Form.useForm<ProxyForm>();
   const [editing, setEditing] = useState<number>();
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const advancedId = useId();
   const requestsPerSecond = Form.useWatch('requestsPerSecond', form);
   function open(index: number) {
     const route = routes[index];
@@ -50,7 +55,7 @@ export default function ProxyRules({
         name: '',
         path: routes.length ? '' : '/',
         target: '',
-        host: '',
+        host: '$host',
         enabled: true,
       }),
       webSocket: route?.webSocket ?? true,
@@ -58,6 +63,7 @@ export default function ProxyRules({
       requestsPerSecond: route?.rateLimit?.requestsPerSecond ?? 0,
       burst: route?.rateLimit?.burst ?? 0,
     });
+    setAdvancedOpen(false);
     setEditing(index);
   }
   return (
@@ -148,10 +154,15 @@ export default function ProxyRules({
         )}
         <Form
           form={form}
+          className="proxy-rule-form"
           layout="horizontal"
           labelCol={{ flex: LAYOUT.formLabelWidth }}
           wrapperCol={{ flex: 1, style: { minWidth: 0 } }}
           colon={false}
+          onFinishFailed={({ errorFields }) => {
+            if (errorFields.some(({ name }) => name[0] === 'headers'))
+              setAdvancedOpen(true);
+          }}
           onFinish={async ({
             cacheTTL,
             requestsPerSecond,
@@ -196,136 +207,128 @@ export default function ProxyRules({
             <Input placeholder="http://127.0.0.1:8080/" />
           </Form.Item>
           <Form.Item name="host" label="发送域名">
-            <Input placeholder="默认使用目标主机，可填写域名或 $host" />
+            <Input placeholder="留空使用目标主机，可填写域名或 $host" />
           </Form.Item>
-          <Collapse
-            size="small"
-            items={[
-              {
-                key: 'advanced',
-                label: '高级设置',
-                forceRender: true,
-                children: (
-                  <>
-                    <Form.Item
-                      name="webSocket"
-                      label="WebSocket"
-                      valuePropName="checked"
-                    >
-                      <Switch />
-                    </Form.Item>
-                    <Form.Item
-                      name="cacheTTL"
-                      label="缓存时长"
-                      extra="填 0 关闭。带 Cookie、Authorization 或 Upgrade 的请求会绕过缓存，上游缓存响应头优先。"
-                    >
-                      <InputNumber
-                        min={0}
-                        max={86400}
-                        precision={0}
-                        suffix="秒"
-                      />
-                    </Form.Item>
-                    <Form.Item
-                      name="requestsPerSecond"
-                      label="请求限速"
-                      extra="按客户端 IP 统计，填 0 关闭。超限返回 HTTP 429。"
-                    >
-                      <InputNumber
-                        min={0}
-                        max={10000}
-                        precision={0}
-                        suffix="次/秒"
-                      />
-                    </Form.Item>
-                    <Form.Item name="burst" label="允许突发">
-                      <InputNumber
-                        min={0}
-                        max={10000}
-                        precision={0}
-                        suffix="次"
-                        disabled={!requestsPerSecond}
-                      />
-                    </Form.Item>
-                    <Form.Item
-                      label="自定义 Header"
-                      extra="填写固定值，留空可移除同名 Header。"
-                    >
-                      <Form.List name="headers">
-                        {(fields, { add, remove }) => (
-                          <>
-                            {fields.map(({ key, name }) => (
-                              <Flex
-                                key={key}
-                                gap={SPACING.sm}
-                                align="start"
-                                style={{ marginBottom: SPACING.sm }}
-                              >
-                                <Form.Item name={[name, 'direction']} noStyle>
-                                  <Select
-                                    aria-label="Header 方向"
-                                    popupMatchSelectWidth={false}
-                                    options={[
-                                      { value: 'request', label: '请求' },
-                                      { value: 'response', label: '响应' },
-                                    ]}
-                                  />
-                                </Form.Item>
-                                <Form.Item
-                                  name={[name, 'name']}
-                                  style={{ marginBottom: 0, flex: 1 }}
-                                  rules={[
-                                    {
-                                      required: true,
-                                      pattern:
-                                        /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/,
-                                      message: 'Header 名称无效',
-                                    },
-                                  ]}
-                                >
-                                  <Input
-                                    aria-label="Header 名称"
-                                    placeholder="名称"
-                                    maxLength={64}
-                                  />
-                                </Form.Item>
-                                <Form.Item name={[name, 'value']} noStyle>
-                                  <Input
-                                    aria-label="Header 值"
-                                    placeholder="值"
-                                    maxLength={2048}
-                                  />
-                                </Form.Item>
-                                <Button
-                                  type="text"
-                                  icon={<MinusCircleOutlined />}
-                                  aria-label="移除 Header"
-                                  onClick={() => remove(name)}
-                                />
-                              </Flex>
-                            ))}
-                            <Button
-                              icon={<PlusOutlined />}
-                              disabled={fields.length >= 20}
-                              onClick={() =>
-                                add({
-                                  direction: 'request',
-                                  name: '',
-                                  value: '',
-                                })
-                              }
-                            >
-                              添加 Header
-                            </Button>
-                          </>
-                        )}
-                      </Form.List>
-                    </Form.Item>
-                  </>
-                ),
-              },
-            ]}
+          <Form.Item
+            label={
+              <Button
+                type="link"
+                icon={advancedOpen ? <DownOutlined /> : <RightOutlined />}
+                aria-expanded={advancedOpen}
+                aria-controls={advancedId}
+                onClick={() => setAdvancedOpen(!advancedOpen)}
+                style={{ paddingInline: 0 }}
+              >
+                高级配置
+              </Button>
+            }
+            style={{ marginBottom: 0 }}
           />
+          <div id={advancedId} hidden={!advancedOpen}>
+            <Form.Item
+              name="webSocket"
+              label="WebSocket"
+              valuePropName="checked"
+            >
+              <Switch />
+            </Form.Item>
+            <Form.Item
+              name="cacheTTL"
+              label="缓存时长"
+              extra="填 0 关闭。带 Cookie、Authorization 或 Upgrade 的请求会绕过缓存，上游缓存响应头优先。"
+            >
+              <InputNumber
+                min={0}
+                max={86400}
+                precision={0}
+                suffix="秒"
+                style={{ width: '100%' }}
+              />
+            </Form.Item>
+            <Form.Item
+              name="requestsPerSecond"
+              label="请求限速"
+              extra="按客户端 IP 统计，填 0 关闭。超限返回 HTTP 429。"
+            >
+              <InputNumber min={0} max={10000} precision={0} suffix="次/秒" />
+            </Form.Item>
+            <Form.Item name="burst" label="允许突发">
+              <InputNumber
+                min={0}
+                max={10000}
+                precision={0}
+                suffix="次"
+                disabled={!requestsPerSecond}
+              />
+            </Form.Item>
+            <Form.Item
+              label="自定义 Header"
+              extra="填写固定值，留空可移除同名 Header。"
+            >
+              <Form.List name="headers">
+                {(fields, { add, remove }) => (
+                  <>
+                    {fields.map(({ key, name }) => (
+                      <div key={key} className="proxy-header-fields">
+                        <Form.Item name={[name, 'direction']} noStyle>
+                          <Select
+                            aria-label="Header 方向"
+                            popupMatchSelectWidth={false}
+                            options={[
+                              { value: 'request', label: '请求' },
+                              { value: 'response', label: '响应' },
+                            ]}
+                          />
+                        </Form.Item>
+                        <Form.Item
+                          name={[name, 'name']}
+                          rules={[
+                            {
+                              required: true,
+                              pattern: /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/,
+                              message: 'Header 名称无效',
+                            },
+                          ]}
+                        >
+                          <Input
+                            aria-label="Header 名称"
+                            placeholder="名称"
+                            maxLength={64}
+                          />
+                        </Form.Item>
+                        <Form.Item name={[name, 'value']} noStyle>
+                          <Input
+                            aria-label="Header 值"
+                            placeholder="值"
+                            maxLength={2048}
+                          />
+                        </Form.Item>
+                        <Button
+                          type="text"
+                          icon={<MinusCircleOutlined />}
+                          aria-label="移除 Header"
+                          onClick={() => remove(name)}
+                        />
+                      </div>
+                    ))}
+                    <Button
+                      icon={<PlusOutlined />}
+                      disabled={fields.length >= 20}
+                      onClick={() =>
+                        add({
+                          direction: 'request',
+                          name: '',
+                          value: '',
+                        })
+                      }
+                    >
+                      添加 Header
+                    </Button>
+                  </>
+                )}
+              </Form.List>
+            </Form.Item>
+          </div>
         </Form>
       </Modal>
     </Space>

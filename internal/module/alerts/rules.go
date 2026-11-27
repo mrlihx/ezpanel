@@ -52,7 +52,7 @@ func (in *RuleInput) validate() error {
 	if in.Title == "" || utf8.RuneCountInString(in.Title) > 64 || strings.IndexFunc(in.Title, unicode.IsControl) >= 0 {
 		return errors.New("请输入 1 至 64 个字符的单行标题")
 	}
-	if !slices.Contains([]string{"service", "project", "certificate"}, in.Kind) || in.Target == "" || len(in.Target) > 128 {
+	if !slices.Contains([]string{"service", "project", "certificate", "plugin"}, in.Kind) || in.Target == "" || len(in.Target) > 128 {
 		return errors.New("请选择有效的告警对象")
 	}
 	if in.IntervalSeconds < 60 || in.IntervalSeconds > 86400 {

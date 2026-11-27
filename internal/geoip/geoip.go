@@ -166,8 +166,14 @@ func Location(value string) string {
 	}
 
 	databases.RLock()
-	defer databases.RUnlock()
-	if reader := databases.mmdb; reader != nil {
+	mmdbReader := databases.mmdb
+	xdbReader := databases.xdb[1]
+	if ip.Is4() {
+		xdbReader = databases.xdb[0]
+	}
+	databases.RUnlock()
+
+	if mmdbReader != nil {
 		var record struct {
 			Country struct {
 				Names names `maxminddb:"names"`
@@ -179,7 +185,7 @@ func Location(value string) string {
 				Names names `maxminddb:"names"`
 			} `maxminddb:"city"`
 		}
-		result := reader.Lookup(ip)
+		result := mmdbReader.Lookup(ip)
 		if result.Found() && result.Decode(&record) == nil {
 			parts := []string{record.Country.Names.display()}
 			for _, subdivision := range record.Subdivisions {
@@ -191,16 +197,12 @@ func Location(value string) string {
 		}
 	}
 
-	reader := databases.xdb[1]
-	if ip.Is4() {
-		reader = databases.xdb[0]
-	}
-	if reader == nil {
+	if xdbReader == nil {
 		return ""
 	}
-	reader.mu.Lock()
-	region, err := reader.Search(ip.AsSlice())
-	reader.mu.Unlock()
+	xdbReader.mu.Lock()
+	region, err := xdbReader.Search(ip.AsSlice())
+	xdbReader.mu.Unlock()
 	if err != nil {
 		return ""
 	}

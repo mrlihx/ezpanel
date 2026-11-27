@@ -82,15 +82,6 @@ export const charsetList = (id: string) =>
   request<{ list: { charset: string; collations: string[] }[] }>(
     `/api/db/servers/${id}/charsets`,
   );
-export const backupList = (
-  id: string | undefined,
-  page: number,
-  size: number,
-  database?: string,
-) =>
-  request<{ list: Backup[]; total: number }>('/api/db/backups', {
-    params: { serverId: id, page, page_size: size, database },
-  });
 export const saveServer = (id: string | undefined, data: ServerInput) =>
   request<{ id: string }>(`/api/db/servers${id ? `/${id}` : ''}`, {
     method: id ? 'PUT' : 'POST',

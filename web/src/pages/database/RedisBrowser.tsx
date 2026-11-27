@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Alert,
   App,
@@ -35,10 +36,12 @@ type RedisKey = {
 };
 export default function RedisBrowser({
   prefix,
+  toolbar,
   editing,
   onEdit,
 }: {
   prefix: string;
+  toolbar: HTMLDivElement | null;
   editing: string | null;
   onEdit: (key: string | null) => void;
 }) {
@@ -107,25 +110,6 @@ export default function RedisBrowser({
     });
   const list = (
     <>
-      <Flex justify="flex-end" gap={12} wrap style={{ marginBottom: 16 }}>
-        <Space>
-          <Input.Search
-            key={database}
-            allowClear
-            placeholder="请输入键名称"
-            onSearch={(value) => {
-              setPattern(value || '*');
-              setSelected([]);
-            }}
-          />
-          <Button
-            aria-label="刷新键列表"
-            title="刷新"
-            icon={<RotateCw size={16} strokeWidth={1.9} />}
-            onClick={refresh}
-          />
-        </Space>
-      </Flex>
       {keys.error && <Alert type="error" message={keys.error.message} />}
       <ContentSizedTable<RedisKey>
         fillColumn="value"
@@ -237,6 +221,28 @@ export default function RedisBrowser({
   );
   return (
     <>
+      {toolbar &&
+        createPortal(
+          <Space>
+            <Input.Search
+              key={database}
+              allowClear
+              placeholder="请输入键名称"
+              style={{ width: LAYOUT.databaseSelectWidth }}
+              onSearch={(value) => {
+                setPattern(value || '*');
+                setSelected([]);
+              }}
+            />
+            <Button
+              aria-label="刷新键列表"
+              title="刷新"
+              icon={<RotateCw size={16} strokeWidth={1.9} />}
+              onClick={refresh}
+            />
+          </Space>,
+          toolbar,
+        )}
       {dbs.error && <Alert type="error" message={dbs.error.message} />}
       <Tabs
         type="card"

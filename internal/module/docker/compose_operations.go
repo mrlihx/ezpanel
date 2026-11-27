@@ -182,7 +182,7 @@ func (m *Module) submitComposeCreate(c *gin.Context, in composeCreateInput) {
 			}
 		}
 		if in.Deploy {
-			return cli.up(ctx, project, log, in.Pull, in.RemoveOrphans, in.ForceRecreate)
+			return m.deployCompose(ctx, cli, project, log, in.Pull, in.RemoveOrphans, in.ForceRecreate)
 		}
 		return nil
 	})
@@ -355,7 +355,7 @@ func (m *Module) applyComposeChange(ctx context.Context, log *task.Log, project 
 		return false, err
 	}
 	if change.Apply {
-		return true, cli.up(ctx, project, log, false, true, false)
+		return true, m.deployCompose(ctx, cli, project, log, false, true, false)
 	}
 	return true, nil
 }
@@ -394,20 +394,69 @@ func (m *Module) composeProjectAction(c *gin.Context) {
 		}
 		switch in.Action {
 		case "up":
-			return cli.up(ctx, project, log, false, false, false)
+			return m.deployCompose(ctx, cli, project, log, false, false, false)
 		case "pull-up":
 			if err := cli.run(ctx, project, log, "pull"); err != nil {
 				return err
 			}
-			return cli.up(ctx, project, log, false, true, false)
+			return m.deployCompose(ctx, cli, project, log, false, true, false)
 		case "rebuild":
-			return cli.run(ctx, project, log, "up", "--detach", "--build", "--force-recreate", "--remove-orphans")
+			return m.runDeployment(ctx, project.Name, log, func() error {
+				return cli.run(ctx, project, log, "up", "--detach", "--build", "--force-recreate", "--remove-orphans")
+			})
 		case "down":
 			return cli.run(ctx, project, log, composeDownArgs(in.RemoveVolumes, in.RemoveImages)...)
 		default:
 			return cli.run(ctx, project, log, in.Action)
 		}
 	})
+}
+
+func (m *Module) PluginDeployCompose(ctx context.Context, name string, log *task.Log) error {
+	ctx, cancel := context.WithTimeout(ctx, composeActionTimeout)
+	defer cancel()
+	var row store.DockerComposeProject
+	if err := m.db.WithContext(ctx).First(&row, "name = ?", name).Error; err != nil {
+		return errors.New("Compose 项目已移除")
+	}
+	project, err := m.checkComposeFiles(composeView(row), true)
+	if err != nil {
+		return err
+	}
+	cli, err := detectComposeCLI(ctx)
+	if err != nil {
+		return err
+	}
+	return m.deployCompose(ctx, cli, project, log, false, false, false)
+}
+
+func (m *Module) SetDeploymentHooks(hook func(context.Context, string, string, string, *task.Log) error) {
+	m.deploymentHooks = hook
+}
+
+func (m *Module) deployCompose(ctx context.Context, cli composeCLI, project composeProjectView, log *task.Log, pull, removeOrphans, recreate bool) error {
+	return m.runDeployment(ctx, project.Name, log, func() error {
+		return cli.up(ctx, project, log, pull, removeOrphans, recreate)
+	})
+}
+
+func (m *Module) runDeployment(ctx context.Context, project string, log *task.Log, deploy func() error) error {
+	if m.deploymentHooks == nil {
+		return deploy()
+	}
+	if err := m.deploymentHooks(ctx, project, "before", "", log); err != nil {
+		log.Line(err.Error())
+		return err
+	}
+	err := deploy()
+	status := "success"
+	if err != nil {
+		status = "failed"
+	}
+	if hookErr := m.deploymentHooks(ctx, project, "after", status, log); hookErr != nil {
+		log.Line(hookErr.Error())
+	}
+	return err
 }
 
 func composeDownArgs(removeVolumes, removeImages bool) []string {
